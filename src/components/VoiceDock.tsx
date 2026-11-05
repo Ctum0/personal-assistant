@@ -83,7 +83,7 @@ export const VoiceDock: React.FC<VoiceDockProps> = ({
 
   return (
     <div
-      className={`glass-panel p-3.5 rounded-2xl flex items-center justify-between border border-rose-500/25 shadow-lg ${className}`}
+      className={`glass-panel p-3.5 rounded-2xl flex items-center justify-between border border-rose-500/30 shadow-lg ${className}`}
     >
       {/* Left status info */}
       <div className="flex items-center space-x-3">
@@ -93,14 +93,15 @@ export const VoiceDock: React.FC<VoiceDockProps> = ({
               ? 'bg-rose-500 animate-ping'
               : isSpeaking
               ? 'bg-amber-400 animate-pulse'
-              : 'bg-emerald-500/80'
+              : 'bg-emerald-500'
           }`}
+          aria-hidden="true"
         />
         <div className="flex flex-col">
-          <span className="text-xs font-mono uppercase tracking-wider text-rose-200">
+          <span className="text-xs font-mono uppercase tracking-wider text-rose-100 font-bold">
             {isListening ? 'Listening...' : isSpeaking ? 'Sofia Speaking' : 'Voice Link Ready'}
           </span>
-          <span className="text-[11px] font-sans text-rose-300/60 truncate max-w-xs">
+          <span className="text-[11px] font-sans text-rose-300 truncate max-w-xs">
             {interimText || (isListening ? 'Speak your thought...' : 'Hold or click to talk')}
           </span>
         </div>
@@ -108,7 +109,7 @@ export const VoiceDock: React.FC<VoiceDockProps> = ({
 
       {/* Center audio wave indicator when active */}
       {(isListening || isSpeaking) && (
-        <div className="flex items-center space-x-1 px-3">
+        <div className="flex items-center space-x-1 px-3" aria-hidden="true">
           <span className="w-1 h-3 bg-rose-400 rounded-full animate-[bounce_0.5s_infinite_100ms]" />
           <span className="w-1 h-5 bg-rose-500 rounded-full animate-[bounce_0.5s_infinite_200ms]" />
           <span className="w-1 h-6 bg-rose-300 rounded-full animate-[bounce_0.5s_infinite_300ms]" />
@@ -123,10 +124,11 @@ export const VoiceDock: React.FC<VoiceDockProps> = ({
         {isSpeaking && (
           <button
             onClick={onStopSpeaking}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-red-950/80 hover:bg-red-900 border border-red-500/50 text-red-200 text-xs font-mono transition-all"
+            aria-label="Stop Sofia voice output (barge-in)"
+            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-red-950/80 hover:bg-red-900 border border-red-500/50 text-red-200 text-xs font-mono transition-all min-h-[44px]"
             title="Interrupt Sofia (Barge-in)"
           >
-            <Square className="w-3.5 h-3.5 fill-red-400 text-red-400" />
+            <Square className="w-3.5 h-3.5 fill-red-400 text-red-400" aria-hidden="true" />
             <span>Stop</span>
           </button>
         )}
@@ -135,14 +137,24 @@ export const VoiceDock: React.FC<VoiceDockProps> = ({
         <button
           onClick={startListening}
           disabled={isListening}
-          className={`relative p-3 rounded-xl flex items-center justify-center transition-all ${
+          aria-pressed={isListening}
+          aria-label={
+            isListening
+              ? 'Voice input active - currently listening'
+              : 'Start voice input (push to talk)'
+          }
+          className={`relative p-3 rounded-xl flex items-center justify-center transition-all min-h-[44px] min-w-[44px] ${
             isListening
               ? 'bg-rose-600 text-white shadow-[0_0_20px_rgba(244,63,94,0.6)] scale-105'
               : 'bg-rose-950/70 hover:bg-rose-900/80 text-rose-200 border border-rose-500/30'
           }`}
           title="Push to talk"
         >
-          {isListening ? <Mic className="w-5 h-5 animate-pulse" /> : <Mic className="w-5 h-5" />}
+          {isListening ? (
+            <Mic className="w-5 h-5 animate-pulse" aria-hidden="true" />
+          ) : (
+            <Mic className="w-5 h-5" aria-hidden="true" />
+          )}
         </button>
       </div>
     </div>

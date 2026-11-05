@@ -95,157 +95,179 @@ export default function ComputerUsePage() {
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Header */}
+      {/* Header with Level 1 Heading */}
       <div className="glass-panel p-6 rounded-3xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center space-x-2.5">
-            <Monitor className="w-6 h-6 text-rose-400" />
+            <Monitor className="w-6 h-6 text-rose-400" aria-hidden="true" />
             <h1 className="text-2xl font-bold font-mono tracking-wider text-rose-50 glow-text-burgundy">
               Hermes Computer Use
             </h1>
           </div>
-          <p className="text-xs font-mono text-rose-300/70">
+          <p className="text-xs font-mono text-rose-200">
             Background Desktop Automation &middot; CUA Driver &middot; Sofia Chief of Staff Integration
           </p>
         </div>
 
         <div className="flex items-center space-x-3">
-          <div className="px-3.5 py-1.5 rounded-full bg-emerald-950/60 border border-emerald-500/40 text-xs font-mono text-emerald-300 flex items-center space-x-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-            <span>Gateway :8642 Connected</span>
+          <div className="px-3.5 py-2 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-xs font-mono text-emerald-300 flex items-center space-x-2 min-h-[44px]">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" aria-hidden="true" />
+            <span className="font-bold">Gateway :8642 Connected</span>
           </div>
           <button
             onClick={fetchStatus}
-            className="p-2 rounded-xl bg-rose-950/50 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 transition-colors"
+            aria-label="Refresh Hermes computer use status"
+            className="p-3 rounded-xl bg-rose-950/60 hover:bg-rose-900/60 border border-rose-500/30 text-rose-200 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
             title="Refresh status"
           >
-            <RotateCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            <RotateCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
           </button>
         </div>
       </div>
 
       {/* Capabilities & Toolsets Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {toolsets.map((t) => {
-          const Icon = t.icon;
-          return (
-            <div key={t.name} className="glass-card p-4 rounded-2xl border border-rose-500/20 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2 text-rose-200 font-mono text-xs font-bold">
-                  <Icon className="w-4 h-4 text-rose-400" />
-                  <span>{t.label}</span>
+      <section aria-labelledby="capabilities-heading" className="space-y-3">
+        <h2 id="capabilities-heading" className="sr-only">Autonomous Agent Capabilities</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-4">
+          {toolsets.map((t) => {
+            const Icon = t.icon;
+            return (
+              <div key={t.name} className="glass-card p-4 rounded-2xl border border-rose-500/25 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 text-rose-100 font-mono text-xs font-bold">
+                    <Icon className="w-4 h-4 text-rose-400" aria-hidden="true" />
+                    <span>{t.label}</span>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-mono font-bold">
+                    Active
+                  </span>
                 </div>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-mono">
-                  Active
-                </span>
+                <p className="text-xs text-rose-200 leading-relaxed font-sans">{t.desc}</p>
               </div>
-              <p className="text-[11px] text-rose-300/70 leading-relaxed font-sans">{t.desc}</p>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      </section>
 
       {/* Quick Computer Use Triggers */}
-      <div className="glass-card p-5 rounded-2xl border border-rose-500/20 space-y-3">
-        <h3 className="text-xs font-mono uppercase tracking-wider text-rose-200">
+      <section aria-labelledby="tasks-heading" className="glass-card p-5 rounded-2xl border border-rose-500/25 space-y-3">
+        <h2 id="tasks-heading" className="text-xs font-mono uppercase tracking-wider text-rose-200 font-semibold">
           Quick Verified Computer Tasks
-        </h3>
+        </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <button
             onClick={() => runComputerAction('system_status', 'check system load and memory')}
             disabled={isRunning}
-            className="p-3 rounded-xl bg-rose-950/50 hover:bg-rose-900/60 border border-rose-500/30 text-left transition-all"
+            aria-busy={isRunning}
+            className="p-3.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/60 border border-rose-500/30 text-left transition-all min-h-[44px]"
           >
             <div className="text-xs font-mono font-bold text-rose-100">System Resources</div>
-            <div className="text-[10px] text-rose-300/60 mt-0.5">Check RAM, CPU, load average</div>
+            <div className="text-[11px] text-rose-300 mt-0.5">Check RAM, CPU, load average</div>
           </button>
 
           <button
             onClick={() => runComputerAction('list_windows', 'list visible apps and windows')}
             disabled={isRunning}
-            className="p-3 rounded-xl bg-rose-950/50 hover:bg-rose-900/60 border border-rose-500/30 text-left transition-all"
+            aria-busy={isRunning}
+            className="p-3.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/60 border border-rose-500/30 text-left transition-all min-h-[44px]"
           >
             <div className="text-xs font-mono font-bold text-rose-100">Audit Active Windows</div>
-            <div className="text-[10px] text-rose-300/60 mt-0.5">Inspect running desktop windows</div>
+            <div className="text-[11px] text-rose-300 mt-0.5">Inspect running desktop windows</div>
           </button>
 
           <button
             onClick={() => runComputerAction('terminal_run', 'git status -s')}
             disabled={isRunning}
-            className="p-3 rounded-xl bg-rose-950/50 hover:bg-rose-900/60 border border-rose-500/30 text-left transition-all"
+            aria-busy={isRunning}
+            className="p-3.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/60 border border-rose-500/30 text-left transition-all min-h-[44px]"
           >
             <div className="text-xs font-mono font-bold text-rose-100">Git Status Audit</div>
-            <div className="text-[10px] text-rose-300/60 mt-0.5">Check uncommitted work in repo</div>
+            <div className="text-[11px] text-rose-300 mt-0.5">Check uncommitted work in repo</div>
           </button>
 
           <button
-            onClick={() => runComputerAction('terminal_run', 'curl -s http://127.0.0.1:8642/v1/capabilities')}
+            onClick={() => runComputerAction('take_screenshot', 'capture full desktop')}
             disabled={isRunning}
-            className="p-3 rounded-xl bg-rose-950/50 hover:bg-rose-900/60 border border-rose-500/30 text-left transition-all"
+            aria-busy={isRunning}
+            className="p-3.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/60 border border-rose-500/30 text-left transition-all min-h-[44px]"
           >
-            <div className="text-xs font-mono font-bold text-rose-100">Probe Hermes API</div>
-            <div className="text-[10px] text-rose-300/60 mt-0.5">Verify tool catalog endpoints</div>
+            <div className="text-xs font-mono font-bold text-rose-100">Desktop Snapshot</div>
+            <div className="text-[11px] text-rose-300 mt-0.5">Capture screen via CUA Driver</div>
           </button>
         </div>
-      </div>
+      </section>
 
-      {/* Custom Command Execution Input */}
-      <div className="glass-card p-5 rounded-2xl border border-rose-500/20 space-y-3">
-        <h3 className="text-xs font-mono uppercase tracking-wider text-rose-200">
-          Run Custom Hermes Computer Task
-        </h3>
+      {/* Custom Command Execution Bar */}
+      <section aria-labelledby="custom-exec-heading" className="glass-panel p-5 rounded-2xl border border-rose-500/25 space-y-3">
+        <h2 id="custom-exec-heading" className="text-xs font-mono uppercase tracking-wider text-rose-200 font-semibold flex items-center space-x-2">
+          <Command className="w-3.5 h-3.5 text-rose-400" aria-hidden="true" />
+          <span>Execute Custom Computer Action</span>
+        </h2>
         <form
           onSubmit={(e) => {
             e.preventDefault();
             if (customCommand.trim()) {
-              runComputerAction('terminal_run', customCommand);
+              runComputerAction('custom_exec', customCommand.trim());
               setCustomCommand('');
             }
           }}
           className="flex items-center space-x-2"
         >
+          <label htmlFor="custom-command-input" className="sr-only">
+            Custom computer command or shell action
+          </label>
           <input
+            id="custom-command-input"
             type="text"
             value={customCommand}
             onChange={(e) => setCustomCommand(e.target.value)}
-            placeholder="e.g. Audit running node services and verify gateway health..."
-            className="flex-1 glass-input px-4 py-2.5 rounded-xl text-xs font-mono placeholder:text-rose-400/40 text-rose-50"
+            placeholder="e.g. open application VS Code, check uptime, list background tasks..."
+            className="flex-1 glass-input px-4 py-2.5 rounded-xl text-xs placeholder:text-rose-300 text-rose-50 min-h-[44px]"
           />
           <button
             type="submit"
             disabled={isRunning || !customCommand.trim()}
-            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-700 to-crimson-600 hover:from-rose-600 hover:to-crimson-500 disabled:opacity-40 text-white font-mono text-xs font-bold transition-all shadow-[0_0_15px_rgba(225,29,72,0.3)] flex items-center space-x-2"
+            className="px-5 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-600 disabled:opacity-40 text-white font-mono text-xs font-bold transition-all min-h-[44px] flex items-center justify-center space-x-1.5"
           >
-            <Play className={`w-3.5 h-3.5 ${isRunning ? 'animate-spin' : ''}`} />
-            <span>Execute</span>
+            <Play className="w-3.5 h-3.5 fill-white" aria-hidden="true" />
+            <span>Dispatch</span>
           </button>
         </form>
-      </div>
+      </section>
 
-      {/* Execution Console Logs */}
-      <div className="glass-panel p-5 rounded-2xl border border-rose-500/20 space-y-3 font-mono">
-        <div className="flex items-center justify-between text-xs text-rose-300/80 border-b border-rose-500/15 pb-2">
-          <div className="flex items-center space-x-2">
-            <Command className="w-4 h-4 text-rose-400" />
-            <span>Computer Use Console</span>
-          </div>
-          <span className="text-[10px] text-rose-400/50">Background Daemon Logs</span>
+      {/* Execution Logs Terminal */}
+      <section aria-labelledby="logs-heading" className="glass-card p-5 rounded-2xl border border-rose-500/25 space-y-3 font-mono">
+        <div className="flex items-center justify-between border-b border-rose-500/20 pb-2">
+          <h2 id="logs-heading" className="text-xs text-rose-200 uppercase tracking-wider flex items-center space-x-2 font-semibold">
+            <Terminal className="w-3.5 h-3.5 text-rose-400" aria-hidden="true" />
+            <span>Computer Use Execution Logs</span>
+          </h2>
+          <span className="text-[11px] text-rose-300">
+            {executionLogs.length} events logged
+          </span>
         </div>
 
-        <div className="space-y-3 max-h-96 overflow-y-auto pt-1">
+        <div className="space-y-2 max-h-72 overflow-y-auto" role="log" aria-live="polite">
           {executionLogs.map((log, idx) => (
-            <div key={idx} className="p-3 rounded-xl bg-[#0d0107]/90 border border-rose-500/15 space-y-1.5 text-xs">
-              <div className="flex items-center justify-between text-rose-400/70 text-[10px]">
-                <span className="text-rose-300 font-bold">&gt; {log.command}</span>
+            <div
+              key={idx}
+              className="p-3 rounded-xl bg-[#120209]/90 border border-rose-500/20 text-xs space-y-1"
+            >
+              <div className="flex items-center justify-between text-[11px] text-rose-300">
+                <span className="font-bold text-rose-100">&gt; {log.command}</span>
                 <span>{log.ts}</span>
               </div>
-              <pre className="text-rose-100 whitespace-pre-wrap font-mono text-[11px] leading-relaxed overflow-x-auto">
+              <div
+                className={`text-[11px] font-sans ${
+                  log.success ? 'text-emerald-300' : 'text-red-300'
+                }`}
+              >
                 {log.result}
-              </pre>
+              </div>
             </div>
           ))}
         </div>
-      </div>
+      </section>
     </div>
   );
 }

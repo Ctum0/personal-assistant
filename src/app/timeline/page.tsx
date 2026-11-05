@@ -65,73 +65,77 @@ export default function TimelinePage() {
       <div className="glass-panel p-6 rounded-3xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center space-x-2.5">
-            <Clock className="w-6 h-6 text-rose-400" />
+            <Clock className="w-6 h-6 text-rose-400" aria-hidden="true" />
             <h1 className="text-2xl font-bold font-mono tracking-wider text-rose-50 glow-text-burgundy">
               Activity Timeline
             </h1>
           </div>
-          <p className="text-xs font-mono text-rose-300/70">
+          <p className="text-xs font-mono text-rose-200">
             Hour-by-Hour Activity Breakdown &middot; Application Tracking &middot; Telemetry Audit
           </p>
         </div>
 
         <button
           onClick={fetchTimeline}
-          className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/60 border border-rose-500/30 text-rose-200 text-xs font-mono transition-all"
+          aria-label="Refresh timeline data"
+          className="flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/60 border border-rose-500/30 text-rose-100 text-xs font-mono transition-all min-h-[44px]"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
           <span>Refresh</span>
         </button>
       </div>
 
       {/* 24-Hour Stacked Bar Grid */}
-      <div className="glass-card p-6 rounded-3xl border border-rose-500/20 space-y-4">
-        <div className="flex items-center justify-between border-b border-rose-500/15 pb-3">
+      <section aria-labelledby="timeline-grid-heading" className="glass-card p-6 rounded-3xl border border-rose-500/25 space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-rose-500/20 pb-3 gap-2">
           <div className="flex items-center space-x-4 text-xs font-mono">
-            <span className="flex items-center space-x-1.5 text-emerald-300">
-              <span className="w-2.5 h-2.5 rounded bg-emerald-500" />
+            <h2 id="timeline-grid-heading" className="sr-only">24-Hour Activity Grid</h2>
+            <span className="flex items-center space-x-1.5 text-emerald-300 font-medium">
+              <span className="w-2.5 h-2.5 rounded bg-emerald-500" aria-hidden="true" />
               <span>Work</span>
             </span>
-            <span className="flex items-center space-x-1.5 text-rose-300">
-              <span className="w-2.5 h-2.5 rounded bg-rose-500" />
+            <span className="flex items-center space-x-1.5 text-rose-300 font-medium">
+              <span className="w-2.5 h-2.5 rounded bg-rose-500" aria-hidden="true" />
               <span>Leisure</span>
             </span>
-            <span className="flex items-center space-x-1.5 text-slate-300">
-              <span className="w-2.5 h-2.5 rounded bg-slate-400" />
+            <span className="flex items-center space-x-1.5 text-slate-200 font-medium">
+              <span className="w-2.5 h-2.5 rounded bg-slate-400" aria-hidden="true" />
               <span>Neutral</span>
             </span>
           </div>
-          <span className="text-xs font-mono text-rose-400/60">Click any hour bar to inspect apps</span>
+          <span className="text-xs font-mono text-rose-300">Select any hour bar to inspect apps</span>
         </div>
 
         {/* 24 Hour Bars */}
-        <div className="grid grid-cols-12 md:grid-cols-24 gap-1.5 items-end h-48 pt-4">
+        <div className="grid grid-cols-12 md:grid-cols-24 gap-1.5 items-end h-52 pt-4">
           {timeline.map((item) => {
             const total = item.work + item.leisure + item.neutral;
             const heightPct = Math.min(100, Math.round((total / 60) * 100));
             const isSelected = selectedHour === item.hour;
 
             return (
-              <div
+              <button
                 key={item.hour}
+                type="button"
                 onClick={() => setSelectedHour(item.hour)}
-                className={`flex flex-col items-center justify-end h-full cursor-pointer group transition-all ${
+                aria-pressed={isSelected}
+                aria-label={`Hour ${String(item.hour).padStart(2, '0')}:00. Total active ${total} minutes. Work ${item.work}m, Leisure ${item.leisure}m, Neutral ${item.neutral}m`}
+                className={`flex flex-col items-center justify-end h-full cursor-pointer group transition-all rounded-lg p-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 ${
                   isSelected ? 'scale-105' : ''
                 }`}
               >
                 {/* Stacked bar container */}
                 <div
-                  className={`w-full max-w-[20px] rounded-t-md overflow-hidden flex flex-col justify-end transition-all ${
-                    isSelected ? 'ring-2 ring-rose-400' : 'hover:brightness-125'
+                  className={`w-full max-w-[48px] rounded-t-md overflow-hidden flex flex-col justify-end transition-all ${
+                    isSelected ? 'ring-2 ring-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)]' : 'hover:brightness-125'
                   }`}
-                  style={{ height: `${Math.max(6, heightPct)}%` }}
+                  style={{ height: `${Math.max(8, heightPct)}%` }}
                 >
                   {/* Neutral segment */}
                   {item.neutral > 0 && (
                     <div
                       style={{ height: `${(item.neutral / (total || 1)) * 100}%` }}
                       className="w-full bg-slate-500"
-                      title={`Neutral: ${item.neutral}m`}
                     />
                   )}
                   {/* Leisure segment */}
@@ -139,7 +143,6 @@ export default function TimelinePage() {
                     <div
                       style={{ height: `${(item.leisure / (total || 1)) * 100}%` }}
                       className="w-full bg-rose-500"
-                      title={`Leisure: ${item.leisure}m`}
                     />
                   )}
                   {/* Work segment */}
@@ -147,114 +150,132 @@ export default function TimelinePage() {
                     <div
                       style={{ height: `${(item.work / (total || 1)) * 100}%` }}
                       className="w-full bg-emerald-500"
-                      title={`Work: ${item.work}m`}
                     />
                   )}
                 </div>
 
                 {/* Hour Label */}
-                <span className="text-[10px] font-mono text-rose-400/60 mt-1.5">
+                <span className="text-[11px] font-mono text-rose-300 mt-1.5 font-medium">
                   {String(item.hour).padStart(2, '0')}
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>
-      </div>
+      </section>
 
       {/* Selected Hour Inspection Details */}
       {selectedData && (
-        <div className="glass-panel p-6 rounded-3xl border border-rose-500/20 space-y-4">
-          <div className="flex items-center justify-between border-b border-rose-500/15 pb-2.5">
-            <h3 className="text-sm font-mono font-bold text-rose-100 flex items-center space-x-2">
-              <Clock className="w-4 h-4 text-rose-400" />
+        <section aria-labelledby="selected-hour-heading" className="glass-panel p-6 rounded-3xl border border-rose-500/25 space-y-4">
+          <div className="flex items-center justify-between border-b border-rose-500/20 pb-2.5">
+            <h2 id="selected-hour-heading" className="text-sm font-mono font-bold text-rose-100 flex items-center space-x-2">
+              <Clock className="w-4 h-4 text-rose-400" aria-hidden="true" />
               <span>
                 Hour {String(selectedData.hour).padStart(2, '0')}:00 &ndash; {String(selectedData.hour).padStart(2, '0')}:59 Breakdown
               </span>
-            </h3>
-            <span className="text-xs font-mono text-rose-300">
+            </h2>
+            <span className="text-xs font-mono text-rose-200 font-bold">
               Total Active: {selectedData.work + selectedData.leisure + selectedData.neutral}m
             </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-3 rounded-2xl bg-emerald-950/30 border border-emerald-500/20">
-              <div className="text-xs font-mono text-emerald-400 uppercase">Work Time</div>
+            <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/30">
+              <div className="text-xs font-mono text-emerald-300 uppercase font-semibold">Work Time</div>
               <div className="text-2xl font-bold font-mono text-white mt-1">{selectedData.work}m</div>
             </div>
-            <div className="p-3 rounded-2xl bg-rose-950/30 border border-rose-500/20">
-              <div className="text-xs font-mono text-rose-400 uppercase">Leisure Time</div>
+            <div className="p-3.5 rounded-2xl bg-rose-950/40 border border-rose-500/30">
+              <div className="text-xs font-mono text-rose-300 uppercase font-semibold">Leisure Time</div>
               <div className="text-2xl font-bold font-mono text-white mt-1">{selectedData.leisure}m</div>
             </div>
-            <div className="p-3 rounded-2xl bg-slate-900/40 border border-slate-500/20">
-              <div className="text-xs font-mono text-slate-400 uppercase">Neutral Time</div>
+            <div className="p-3.5 rounded-2xl bg-slate-900/50 border border-slate-500/30">
+              <div className="text-xs font-mono text-slate-300 uppercase font-semibold">Neutral Time</div>
               <div className="text-2xl font-bold font-mono text-white mt-1">{selectedData.neutral}m</div>
             </div>
           </div>
 
           {/* Apps Table */}
           <div className="space-y-2 pt-2">
-            <h4 className="text-xs font-mono uppercase tracking-wider text-rose-300/80">
+            <h3 className="text-xs font-mono uppercase tracking-wider text-rose-200 font-semibold">
               Applications & Windows in this Hour
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
               {Object.entries(selectedData.apps).map(([app, min]) => (
-                <div key={app} className="flex items-center justify-between p-2.5 rounded-xl bg-rose-950/40 border border-rose-500/15 text-xs font-mono">
+                <div key={app} className="flex items-center justify-between p-3 rounded-xl bg-rose-950/50 border border-rose-500/20 text-xs font-mono">
                   <span className="text-rose-100 truncate mr-2">{app}</span>
-                  <span className="text-rose-400 font-bold">{min}m</span>
+                  <span className="text-rose-300 font-bold">{min}m</span>
                 </div>
               ))}
               {Object.keys(selectedData.apps).length === 0 && (
-                <p className="text-xs text-rose-300/50 italic col-span-3">No specific apps recorded in this hour.</p>
+                <p className="text-xs text-rose-300 italic col-span-3">No specific apps recorded in this hour.</p>
               )}
             </div>
           </div>
-        </div>
+        </section>
       )}
 
       {/* Manual Event Ingest Form */}
-      <div className="glass-card p-6 rounded-3xl border border-rose-500/20 space-y-4">
-        <h3 className="text-sm font-mono font-bold text-rose-100 flex items-center space-x-2">
-          <Plus className="w-4 h-4 text-rose-400" />
+      <section aria-labelledby="manual-entry-heading" className="glass-card p-6 rounded-3xl border border-rose-500/25 space-y-4">
+        <h2 id="manual-entry-heading" className="text-sm font-mono font-bold text-rose-100 flex items-center space-x-2">
+          <Plus className="w-4 h-4 text-rose-400" aria-hidden="true" />
           <span>Manual Event / Offline Activity Entry</span>
-        </h3>
+        </h2>
         <form onSubmit={handleAddManualEvent} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-          <input
-            type="text"
-            value={appInput}
-            onChange={(e) => setAppInput(e.target.value)}
-            placeholder="App name (e.g. VS Code, Books, Workout)..."
-            className="sm:col-span-2 glass-input px-3.5 py-2 rounded-xl text-xs"
-            required
-          />
-          <select
-            value={catInput}
-            onChange={(e) => setCatInput(e.target.value as any)}
-            className="glass-input px-3 py-2 rounded-xl text-xs bg-[#1a040e]"
-          >
-            <option value="work">Work</option>
-            <option value="leisure">Leisure</option>
-            <option value="neutral">Neutral</option>
-          </select>
-          <div className="flex items-center space-x-2">
+          <div className="sm:col-span-2">
+            <label htmlFor="manual-app-name" className="sr-only">
+              Application name
+            </label>
             <input
+              id="manual-app-name"
+              type="text"
+              value={appInput}
+              onChange={(e) => setAppInput(e.target.value)}
+              placeholder="App name (e.g. VS Code, Books, Workout)..."
+              className="w-full glass-input px-3.5 py-2.5 rounded-xl text-xs min-h-[44px]"
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="manual-category" className="sr-only">
+              Activity category
+            </label>
+            <select
+              id="manual-category"
+              value={catInput}
+              onChange={(e) => setCatInput(e.target.value as any)}
+              className="w-full glass-input px-3 py-2.5 rounded-xl text-xs bg-[#1a040e] min-h-[44px]"
+            >
+              <option value="work">Work</option>
+              <option value="leisure">Leisure</option>
+              <option value="neutral">Neutral</option>
+            </select>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <label htmlFor="manual-duration" className="sr-only">
+              Duration in minutes
+            </label>
+            <input
+              id="manual-duration"
               type="number"
               min={5}
               max={180}
               value={durationInput}
               onChange={(e) => setDurationInput(Number(e.target.value))}
-              className="w-20 glass-input px-2.5 py-2 rounded-xl text-xs font-mono text-center"
+              aria-label="Duration in minutes"
+              className="w-20 glass-input px-2.5 py-2 rounded-xl text-xs font-mono text-center min-h-[44px]"
             />
-            <span className="text-xs font-mono text-rose-300/60">min</span>
+            <span className="text-xs font-mono text-rose-200" aria-hidden="true">min</span>
             <button
               type="submit"
-              className="flex-1 py-2 rounded-xl bg-rose-700 hover:bg-rose-600 text-white font-mono text-xs transition-all font-bold"
+              className="flex-1 py-2 rounded-xl bg-rose-700 hover:bg-rose-600 text-white font-mono text-xs transition-all font-bold min-h-[44px] flex items-center justify-center"
             >
               Add
             </button>
           </div>
         </form>
-      </div>
+      </section>
     </div>
   );
 }

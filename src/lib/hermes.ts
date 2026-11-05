@@ -13,6 +13,33 @@ export interface HermesCompletionOptions {
   settings?: SofiaSettings;
 }
 
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
+export function getHermesApiKey(settings?: SofiaSettings): string {
+  if (process.env.HERMES_API_KEY) return process.env.HERMES_API_KEY;
+  if (settings?.hermes?.api_key && settings.hermes.api_key !== 'hermes-sofia-api') {
+    return settings.hermes.api_key;
+  }
+  try {
+    const envPath = path.join(os.homedir(), '.hermes', '.env');
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf8');
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('API_SERVER_KEY=')) {
+          const key = trimmed.split('=', 2)[1].trim().replace(/^["']|["']$/g, '');
+          if (key) return key;
+        }
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return settings?.hermes?.api_key || 'hermes-sofia-api';
+}
+
 export async function checkHermesStatus(settings: SofiaSettings): Promise<{
   online: boolean;
   port: number;
@@ -23,7 +50,7 @@ export async function checkHermesStatus(settings: SofiaSettings): Promise<{
 }> {
   try {
     const baseUrl = settings.hermes.base_url || 'http://127.0.0.1:8642/v1';
-    const apiKey = settings.hermes.api_key || 'hermes-sofia-api';
+    const apiKey = getHermesApiKey(settings);
 
     const res = await fetch(`${baseUrl}/toolsets`, {
       headers: {
@@ -72,7 +99,7 @@ export async function checkHermesStatus(settings: SofiaSettings): Promise<{
 
 export async function callHermesChat(options: HermesCompletionOptions): Promise<string> {
   const baseUrl = options.settings?.hermes.base_url || 'http://127.0.0.1:8642/v1';
-  const apiKey = options.settings?.hermes.api_key || 'hermes-sofia-api';
+  const apiKey = getHermesApiKey(options.settings);
   const model = options.settings?.hermes.model || 'hermes-agent';
 
   const res = await fetch(`${baseUrl}/chat/completions`, {

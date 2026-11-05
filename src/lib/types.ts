@@ -79,6 +79,9 @@ export interface SofiaSettings {
     computer_use_enabled: boolean;
   };
   voice: {
+    provider: 'browser' | 'elevenlabs';
+    elevenlabs_api_key?: string;
+    elevenlabs_voice_id?: string;
     auto_speak: boolean;
     voice_name: string;
     rate: number;
@@ -140,7 +143,10 @@ export const defaultSettings: SofiaSettings = {
     computer_use_enabled: true,
   },
   voice: {
-    auto_speak: false,
+    provider: 'browser',
+    elevenlabs_api_key: '',
+    elevenlabs_voice_id: '21m00Tcm4TlvDq8ikWAM',
+    auto_speak: true,
     voice_name: 'en-US-JennyNeural',
     rate: 1.0,
     pitch: 1.05,

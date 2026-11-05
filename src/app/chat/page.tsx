@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { SofiaAvatar } from '@/components/SofiaAvatar';
 import { VoiceDock } from '@/components/VoiceDock';
 import { ChatMessage, SofiaExpression } from '@/lib/types';
+import { speakSofia, stopSpeaking as haltSpeaking } from '@/lib/voice';
 import {
   Send,
   Sparkles,
@@ -98,23 +99,25 @@ export default function ChatPage() {
         role: 'assistant',
         content: data.text,
         mood: data.mood || 'focused',
-        tool_calls: data.toolCalls,
+        tool_calls: data.tool_calls,
       };
 
       setMessages((prev) => [...prev, sofiaMsg]);
-      if (data.mood) setCurrentMood(data.mood);
+      if (data.mood) setCurrentMood(data.mood as SofiaExpression);
 
-      // Auto-speak if enabled
-      speakText(data.text);
+      // Auto-speak Sofia response if user spoke via VoiceDock
+      if (textToSend) {
+        speakText(data.text);
+      }
     } catch (err) {
-      console.error('Chat error:', err);
+      console.error('Failed to send message:', err);
       setMessages((prev) => [
         ...prev,
         {
           id: `msg-${Date.now()}-err`,
           ts: new Date().toISOString(),
           role: 'assistant',
-          content: 'A momentary blip occurred with the brain link. What were you saying?',
+          content: 'Hermes gateway link timeout. Please check that hermes-gateway is active on port 8642.',
           mood: 'concerned',
         },
       ]);
@@ -124,32 +127,16 @@ export default function ChatPage() {
   };
 
   const speakText = (text: string) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.05;
-
-    const voices = window.speechSynthesis.getVoices();
-    const femaleVoice = voices.find(
-      (v) =>
-        v.lang.startsWith('en') &&
-        (v.name.includes('Female') || v.name.includes('Jenny') || v.name.includes('Samantha'))
-    );
-    if (femaleVoice) utterance.voice = femaleVoice;
-
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-
-    window.speechSynthesis.speak(utterance);
+    speakSofia(text, {
+      onStart: () => setIsSpeaking(true),
+      onEnd: () => setIsSpeaking(false),
+      onError: () => setIsSpeaking(false),
+    });
   };
 
   const stopSpeaking = () => {
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-    }
+    haltSpeaking();
+    setIsSpeaking(false);
   };
 
   const suggestions = [
@@ -160,177 +147,192 @@ export default function ChatPage() {
   ];
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-8rem)]">
-      {/* Left Column: Sofia Presence & Ambient Status */}
-      <div className="hidden lg:flex lg:col-span-4 flex-col items-center justify-between glass-card p-6 rounded-3xl border border-rose-500/20">
-        <div className="flex flex-col items-center space-y-4 text-center">
-          <SofiaAvatar
-            expression={currentMood}
-            isSpeaking={isSpeaking}
-            score={7.5}
-            size="lg"
-            onClick={() => speakText("I'm right here. Keep your focus.")}
-          />
-          <div className="space-y-1">
-            <h2 className="text-xl font-bold font-mono tracking-wider text-rose-50 glow-text-burgundy">
-              SOFIA
-            </h2>
-            <p className="text-xs font-mono text-rose-300/70">
-              Chief of Staff &middot; Hermes AI Engine
-            </p>
-          </div>
-        </div>
+    <div className="space-y-4">
+      {/* Page Title Landmark */}
+      <h1 className="sr-only">Sofia Companion Chat & Command Terminal</h1>
 
-        {/* Live System Specs */}
-        <div className="w-full space-y-3 pt-4 border-t border-rose-500/15 text-xs font-mono">
-          <div className="flex items-center justify-between text-rose-300/80">
-            <span className="flex items-center space-x-1.5">
-              <Cpu className="w-3.5 h-3.5 text-rose-400" />
-              <span>Hermes Model</span>
-            </span>
-            <span className="text-emerald-400">copilot/gpt-4o</span>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-9.5rem)]">
+        {/* Left Column: Sofia Presence & Ambient Status */}
+        <section aria-label="Companion Presence" className="hidden lg:flex lg:col-span-4 flex-col items-center justify-between glass-card p-6 rounded-3xl border border-rose-500/25">
+          <div className="flex flex-col items-center space-y-4 text-center w-full">
+            <div className="w-full flex items-center justify-center py-2">
+              <SofiaAvatar
+                expression={currentMood}
+                isSpeaking={isSpeaking}
+                score={7.5}
+                size="xl"
+                onClick={() => speakText("I'm right here. Keep your focus.")}
+              />
+            </div>
+            <div className="space-y-1">
+              <h2 className="text-2xl font-bold font-mono tracking-wider text-rose-50 glow-text-burgundy">
+                SOFIA
+              </h2>
+              <p className="text-xs font-mono text-rose-300">
+                Chief of Staff &middot; Hermes AI Engine
+              </p>
+            </div>
           </div>
-          <div className="flex items-center justify-between text-rose-300/80">
-            <span className="flex items-center space-x-1.5">
-              <Terminal className="w-3.5 h-3.5 text-rose-400" />
-              <span>CUA Driver</span>
-            </span>
-            <span className="text-emerald-400">Background 0.21.0</span>
-          </div>
-          <div className="flex items-center justify-between text-rose-300/80">
-            <span className="flex items-center space-x-1.5">
-              <Zap className="w-3.5 h-3.5 text-amber-400" />
-              <span>Strictness Dial</span>
-            </span>
-            <span className="text-amber-300">7 / 10</span>
-          </div>
-        </div>
-      </div>
 
-      {/* Right Column: Chat History & Voice Dock */}
-      <div className="lg:col-span-8 flex flex-col glass-card rounded-3xl border border-rose-500/20 overflow-hidden h-full">
-        {/* Messages Scroll Area */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
-          {messages.map((msg) => {
-            const isUser = msg.role === 'user';
-            return (
-              <div
-                key={msg.id}
-                className={`flex items-start space-x-3 ${isUser ? 'flex-row-reverse space-x-reverse' : ''}`}
-              >
-                {/* Avatar Icon */}
+          {/* Live System Specs */}
+          <div className="w-full space-y-3 pt-4 border-t border-rose-500/20 text-xs font-mono">
+            <div className="flex items-center justify-between text-rose-200">
+              <span className="flex items-center space-x-1.5">
+                <Cpu className="w-3.5 h-3.5 text-rose-400" aria-hidden="true" />
+                <span>Hermes Model</span>
+              </span>
+              <span className="text-emerald-400 font-bold">copilot/gpt-4o</span>
+            </div>
+            <div className="flex items-center justify-between text-rose-200">
+              <span className="flex items-center space-x-1.5">
+                <Terminal className="w-3.5 h-3.5 text-rose-400" aria-hidden="true" />
+                <span>CUA Driver</span>
+              </span>
+              <span className="text-emerald-400 font-bold">Background 0.21.0</span>
+            </div>
+            <div className="flex items-center justify-between text-rose-200">
+              <span className="flex items-center space-x-1.5">
+                <Zap className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+                <span>Strictness Dial</span>
+              </span>
+              <span className="text-amber-300 font-bold">7 / 10</span>
+            </div>
+          </div>
+        </section>
+
+        {/* Right Column: Chat History & Voice Dock */}
+        <section aria-label="Conversation Stream" className="lg:col-span-8 flex flex-col glass-card rounded-3xl border border-rose-500/25 overflow-hidden h-full">
+          {/* Messages Scroll Area */}
+          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4" role="log" aria-live="polite">
+            {messages.map((msg) => {
+              const isUser = msg.role === 'user';
+              return (
                 <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 border ${
-                    isUser
-                      ? 'bg-rose-900/60 border-rose-500/40 text-rose-200'
-                      : 'bg-[#220715] border-rose-400/50 text-rose-300'
-                  }`}
+                  key={msg.id}
+                  className={`flex items-start space-x-3 ${isUser ? 'flex-row-reverse space-x-reverse' : ''}`}
                 >
-                  {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4 text-rose-400" />}
-                </div>
+                  {/* Avatar Icon */}
+                  <div
+                    className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 border ${
+                      isUser
+                        ? 'bg-rose-900/70 border-rose-500/50 text-rose-100'
+                        : 'bg-[#220715] border-rose-400/50 text-rose-200'
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4 text-rose-300" />}
+                  </div>
 
-                {/* Message Bubble */}
-                <div
-                  className={`max-w-[80%] rounded-2xl px-4 py-3 space-y-1.5 text-sm leading-relaxed ${
-                    isUser
-                      ? 'bg-rose-950/70 text-rose-50 border border-rose-500/30 rounded-tr-none'
-                      : 'glass-panel text-rose-100 border border-rose-500/20 rounded-tl-none'
-                  }`}
-                >
-                  <p>{msg.content}</p>
+                  {/* Message Bubble */}
+                  <div
+                    className={`max-w-[80%] rounded-2xl px-4 py-3 space-y-1.5 text-sm leading-relaxed ${
+                      isUser
+                        ? 'bg-rose-950/80 text-white border border-rose-500/40 rounded-tr-none'
+                        : 'glass-panel text-rose-50 border border-rose-500/25 rounded-tl-none'
+                    }`}
+                  >
+                    <p>{msg.content}</p>
 
-                  {/* Tool Call Chips if Sofia invoked tools */}
-                  {msg.tool_calls && msg.tool_calls.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {msg.tool_calls.map((tc, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-center space-x-1 px-2 py-0.5 rounded-full bg-rose-950/90 border border-rose-500/30 text-[10px] font-mono text-rose-300"
-                        >
-                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                          <span>Tool: {tc.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Footer with timestamp and speak button */}
-                  <div className="flex items-center justify-between pt-1 text-[10px] font-mono text-rose-400/50">
-                    <span>{new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    {!isUser && (
-                      <button
-                        onClick={() => speakText(msg.content)}
-                        className="hover:text-rose-200 ml-2"
-                        title="Replay voice"
-                      >
-                        <Volume2 className="w-3 h-3" />
-                      </button>
+                    {/* Tool Call Chips if Sofia invoked tools */}
+                    {msg.tool_calls && msg.tool_calls.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {msg.tool_calls.map((tc, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-rose-950/90 border border-rose-500/40 text-[10px] font-mono text-rose-200"
+                          >
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" aria-hidden="true" />
+                            <span>Tool: {tc.name}</span>
+                          </div>
+                        ))}
+                      </div>
                     )}
+
+                    {/* Footer with timestamp and speak button */}
+                    <div className="flex items-center justify-between pt-1 text-xs font-mono text-rose-300">
+                      <span>{new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      {!isUser && (
+                        <button
+                          onClick={() => speakText(msg.content)}
+                          aria-label={`Replay Sofia voice message from ${new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                          className="hover:text-white ml-2 p-1 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-400"
+                          title="Replay voice"
+                        >
+                          <Volume2 className="w-3.5 h-3.5" aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
+              );
+            })}
+
+            {isSending && (
+              <div className="flex items-center space-x-3" role="status">
+                <div className="w-8 h-8 rounded-full bg-[#220715] border border-rose-400/50 flex items-center justify-center">
+                  <Bot className="w-4 h-4 text-rose-400 animate-spin" aria-hidden="true" />
+                </div>
+                <div className="glass-panel px-4 py-2.5 rounded-2xl rounded-tl-none text-xs font-mono text-rose-200 flex items-center space-x-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping" aria-hidden="true" />
+                  <span>Sofia is analyzing telemetry and crafting response...</span>
+                </div>
               </div>
-            );
-          })}
+            )}
 
-          {isSending && (
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-full bg-[#220715] border border-rose-400/50 flex items-center justify-center">
-                <Bot className="w-4 h-4 text-rose-400 animate-spin" />
-              </div>
-              <div className="glass-panel px-4 py-2.5 rounded-2xl rounded-tl-none text-xs font-mono text-rose-300/80 flex items-center space-x-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping" />
-                <span>Sofia is analyzing telemetry and crafting response...</span>
-              </div>
-            </div>
-          )}
+            <div ref={messagesEndRef} />
+          </div>
 
-          <div ref={messagesEndRef} />
-        </div>
+          {/* Suggestion Pills */}
+          <div className="px-4 py-2 border-t border-rose-500/15 flex items-center space-x-2 overflow-x-auto" aria-label="Quick Prompt Suggestions">
+            {suggestions.map((s, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleSendMessage(s)}
+                aria-label={`Send suggested prompt: ${s}`}
+                className="whitespace-nowrap px-3.5 py-1.5 rounded-full bg-rose-950/50 hover:bg-rose-900/60 border border-rose-500/30 text-xs font-mono text-rose-200 hover:text-white transition-all min-h-[36px]"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
 
-        {/* Suggestion Pills */}
-        <div className="px-4 py-2 border-t border-rose-500/10 flex items-center space-x-2 overflow-x-auto">
-          {suggestions.map((s, idx) => (
-            <button
-              key={idx}
-              onClick={() => handleSendMessage(s)}
-              className="whitespace-nowrap px-3 py-1 rounded-full bg-rose-950/40 hover:bg-rose-900/50 border border-rose-500/20 text-xs font-mono text-rose-300/80 hover:text-rose-100 transition-colors"
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-
-        {/* Voice Dock & Text Input */}
-        <div className="p-4 border-t border-rose-500/20 space-y-3 bg-[#110209]/80 backdrop-blur-xl">
-          <VoiceDock
-            onTranscript={(t) => handleSendMessage(t)}
-            isSpeaking={isSpeaking}
-            onStopSpeaking={stopSpeaking}
-          />
-
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSendMessage();
-            }}
-            className="flex items-center space-x-2"
-          >
-            <input
-              type="text"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="Ask Sofia or issue /focus, /stats, /tasks..."
-              className="flex-1 glass-input px-4 py-2.5 rounded-xl text-sm placeholder:text-rose-400/40 text-rose-50"
+          {/* Voice Dock & Text Input */}
+          <div className="p-4 border-t border-rose-500/25 space-y-3 bg-[#110209]/85 backdrop-blur-xl">
+            <VoiceDock
+              onTranscript={(t) => handleSendMessage(t)}
+              isSpeaking={isSpeaking}
+              onStopSpeaking={stopSpeaking}
             />
-            <button
-              type="submit"
-              disabled={isSending || !inputText.trim()}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-rose-700 to-crimson-600 hover:from-rose-600 hover:to-crimson-500 disabled:opacity-40 text-white font-medium text-sm transition-all shadow-[0_0_15px_rgba(225,29,72,0.3)] flex items-center justify-center"
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendMessage();
+              }}
+              className="flex items-center space-x-2"
             >
-              <Send className="w-4 h-4" />
-            </button>
-          </form>
-        </div>
+              <label htmlFor="chat-message-input" className="sr-only">
+                Message to Sofia
+              </label>
+              <input
+                id="chat-message-input"
+                type="text"
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                placeholder="Ask Sofia or issue /focus, /stats, /tasks..."
+                className="flex-1 glass-input px-4 py-2.5 rounded-xl text-sm placeholder:text-rose-300 text-rose-50 min-h-[44px]"
+              />
+              <button
+                type="submit"
+                disabled={isSending || !inputText.trim()}
+                aria-label="Send message"
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-rose-700 to-crimson-600 hover:from-rose-600 hover:to-crimson-500 disabled:opacity-40 text-white font-medium text-sm transition-all shadow-[0_0_15px_rgba(225,29,72,0.3)] flex items-center justify-center min-h-[44px] min-w-[44px]"
+              >
+                <Send className="w-4 h-4" aria-hidden="true" />
+              </button>
+            </form>
+          </div>
+        </section>
       </div>
     </div>
   );

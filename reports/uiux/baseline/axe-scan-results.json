@@ -1,0 +1,50 @@
+{
+  "Home": {
+    "url": "http://localhost:3000/",
+    "violations": [],
+    "passesCount": 31,
+    "incompleteCount": 1
+  },
+  "Chat": {
+    "url": "http://localhost:3000/chat",
+    "violations": [],
+    "passesCount": 40,
+    "incompleteCount": 2
+  },
+  "Computer Use": {
+    "url": "http://localhost:3000/computer-use",
+    "violations": [],
+    "passesCount": 37,
+    "incompleteCount": 1
+  },
+  "Timeline": {
+    "url": "http://localhost:3000/timeline",
+    "violations": [],
+    "passesCount": 38,
+    "incompleteCount": 1
+  },
+  "History": {
+    "url": "http://localhost:3000/history",
+    "violations": [],
+    "passesCount": 35,
+    "incompleteCount": 1
+  },
+  "Tasks": {
+    "url": "http://localhost:3000/tasks",
+    "violations": [],
+    "passesCount": 39,
+    "incompleteCount": 1
+  },
+  "Memory": {
+    "url": "http://localhost:3000/memory",
+    "violations": [],
+    "passesCount": 39,
+    "incompleteCount": 2
+  },
+  "Settings": {
+    "url": "http://localhost:3000/settings",
+    "violations": [],
+    "passesCount": 37,
+    "incompleteCount": 1
+  }
+}

@@ -38,18 +38,47 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
     sm: 'w-24 h-24',
     md: 'w-44 h-44',
     lg: 'w-64 h-64 md:w-72 md:h-72',
-    xl: 'w-80 h-80 md:w-96 md:h-96',
+    xl: 'w-80 h-80 md:w-96 md:h-96 xl:w-[26rem] xl:h-[26rem]',
   }[size];
 
   return (
     <div
       onClick={onClick}
-      className={`relative flex items-center justify-center select-none group cursor-pointer ${className}`}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      aria-label={onClick ? `${expression.toUpperCase()} - Sofia avatar. Click to speak.` : `${expression.toUpperCase()} - Sofia avatar`}
+      className={`relative flex items-center justify-center select-none group ${onClick ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 rounded-full' : ''} ${className}`}
     >
       {/* Ambient Pulsating Blurry Glow Ring behind avatar */}
       <div
         className={`absolute inset-0 rounded-full bg-gradient-to-tr ${getGlowGradient()} blur-2xl animate-pulse-slow pointer-events-none scale-125`}
       />
+
+      {/* Jarvis Holographic Frequency Rings */}
+      <div className={`absolute ${sizeClasses} scale-110 pointer-events-none flex items-center justify-center`}>
+        {/* Outer dashed spinning ring */}
+        <div
+          className={`absolute inset-0 rounded-full border border-dashed border-rose-500/25 animate-spin-slow ${
+            isSpeaking ? 'border-rose-400/60 shadow-[0_0_20px_rgba(244,63,94,0.3)] animate-jarvis-pulse' : ''
+          }`}
+        />
+        {/* Reverse rotating tick ring */}
+        <div className="absolute inset-2 rounded-full border border-rose-400/15 animate-spin-reverse-slow" />
+        {/* Pulse ripple ring when speaking */}
+        {isSpeaking && (
+          <div className="absolute -inset-4 rounded-full border-2 border-rose-500/40 animate-ping opacity-60" />
+        )}
+      </div>
 
       {/* Glassy circular frame border */}
       <div
@@ -106,6 +135,9 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
               <stop offset="100%" stopColor="#12020a" />
             </linearGradient>
           </defs>
+
+          {/* Living Anime Breathing Wrapper */}
+          <g className="animate-breathe origin-center">
 
           {/* 1. Background Hair (Back layer of cute short bob) */}
           <path
@@ -298,6 +330,7 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
             {/* Fluffy side volume tufts for cute short silhouette */}
             <path d="M88 140 C80 160, 85 180, 94 195 C90 178, 92 158, 96 145 Z" fill="#2d0a1d" />
             <path d="M232 140 C240 160, 235 180, 226 195 C230 178, 228 158, 224 145 Z" fill="#2d0a1d" />
+          </g>
           </g>
         </svg>
 
