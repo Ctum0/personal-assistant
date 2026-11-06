@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+@theme {
+  --color-burgundy-950: #14030a;
+}
+
 @layer base {
   :root {
     --background: #080205;

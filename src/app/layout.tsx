@@ -31,7 +31,7 @@ export default function RootLayout({
         {/* Ambient Dark Burgundy Glassy Orbs */}
         <div className="fixed -top-40 -left-40 w-96 h-96 bg-rose-950/40 rounded-full blur-[140px] pointer-events-none z-0" />
         <div className="fixed top-1/3 -right-40 w-[30rem] h-[30rem] bg-pink-950/30 rounded-full blur-[160px] pointer-events-none z-0" />
-        <div className="fixed -bottom-40 left-1/3 w-[36rem] h-[36rem] bg-burgundy-950/35 rounded-full blur-[180px] pointer-events-none z-0" />
+        <div className="fixed -bottom-40 left-1/3 w-[36rem] h-[36rem] bg-[#14030a]/35 rounded-full blur-[180px] pointer-events-none z-0" />
 
         <div className="relative z-10 flex flex-col h-screen max-h-screen overflow-hidden">
           <Navbar />
