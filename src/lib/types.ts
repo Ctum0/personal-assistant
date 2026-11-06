@@ -4,12 +4,12 @@ export interface ActivityEvent {
   id: string;
   ts: string;
   source: string;
-  kind: 'window' | 'web' | 'manual' | 'heartbeat';
+  kind: 'window' | 'web' | 'manual' | 'heartbeat' | 'commit' | 'review';
   category: AppCategory;
   app: string;
   title?: string;
   duration_s: number;
-  meta?: Record<string, unknown>;
+  meta?: Record<string, unknown> | string;
 }
 
 export interface DayStats {

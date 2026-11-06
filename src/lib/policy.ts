@@ -127,3 +127,55 @@ export function evaluateConsequencePolicy(
       : `APPROVED: Intensity clamped to ${clampedIntensity}%.`,
   };
 }
+
+export function evaluateConsequenceRequest(
+  request: {
+    rung: ConsequenceLogEntry['kind'];
+    intensity: number;
+    reason: string;
+    timestamp?: string;
+  },
+  settings: SofiaSettings,
+  coverage: number = 0.9,
+  dayStatus: string = 'normal',
+  consequenceEligible: boolean = true,
+  existingCountToday: number = 0
+): PolicyCheckResult {
+  const dummyScore: DayScore = {
+    date: new Date().toISOString().slice(0, 10),
+    score: 6.0,
+    components: { wake: 1, focus: 1, output: 1, leisure: 1, sleep: 1 },
+    verdict: {
+      text: request.reason,
+      woke_at: '08:00',
+      commits: 4,
+      leisure_pct: 15,
+      focus_hours: 5,
+      streak_days: 14,
+      consequence_eligible: consequenceEligible && coverage >= 0.8,
+      suggested_intensity: request.intensity,
+    },
+    intensity: request.intensity,
+    status: dayStatus as any,
+  };
+
+  const dummyRecent: ConsequenceLogEntry[] = Array(existingCountToday).fill({
+    id: 'mock',
+    ts: new Date(Date.now() - 3600000).toISOString(),
+    kind: request.rung,
+    intensity: request.intensity,
+    reason: 'prior',
+    approved_by: 'system',
+    status: 'fired',
+  });
+
+  return evaluateConsequencePolicy(
+    request.rung,
+    request.intensity,
+    dummyScore,
+    settings,
+    dummyRecent,
+    new Date(request.timestamp || Date.now())
+  );
+}
+

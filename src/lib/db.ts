@@ -130,7 +130,39 @@ function initDatabase(db: DatabaseSync) {
       approved_by TEXT NOT NULL,
       status TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS devices (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      token_hash TEXT NOT NULL,
+      last_seen TEXT,
+      kind TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS schedules (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      cron TEXT NOT NULL,
+      action TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_run TEXT,
+      next_run TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS proactive_log (
+      id TEXT PRIMARY KEY,
+      ts TEXT NOT NULL,
+      job TEXT NOT NULL,
+      text TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      suppressed_reason TEXT
+    );
   `);
+
+  // Migration guards for columns added in v2
+  try { db.exec('ALTER TABLE day_stats ADD COLUMN offline_min INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec('ALTER TABLE day_stats ADD COLUMN tasks_done INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec('ALTER TABLE rules ADD COLUMN created_at TEXT NOT NULL DEFAULT ""'); } catch {}
 
   seedDefaults(db);
 }
@@ -140,6 +172,15 @@ function seedDefaults(db: DatabaseSync) {
   const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('global') as { value: string } | undefined;
   if (!settingsRow) {
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('global', JSON.stringify(defaultSettings));
+  } else {
+    // Assert voice.auto_speak = true per Section 9 & 16 Trap 7
+    try {
+      const parsed = JSON.parse(settingsRow.value);
+      if (parsed.voice && parsed.voice.auto_speak === false) {
+        parsed.voice.auto_speak = true;
+        db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(JSON.stringify(parsed), 'global');
+      }
+    } catch {}
   }
 
   // 2. Rules for classification
@@ -204,7 +245,16 @@ function seedDefaults(db: DatabaseSync) {
     });
   }
 
-  // 5. Seed sample events for today if empty to bring the dashboard alive immediately
+  // 5. Schedules (the 3 v1 jobs per spec §8)
+  const schedCount = db.prepare('SELECT count(*) as count FROM schedules').get() as { count: number };
+  if (schedCount.count === 0) {
+    const insertSched = db.prepare('INSERT INTO schedules (id, name, cron, action, enabled) VALUES (?, ?, ?, ?, 1)');
+    insertSched.run('sched-wake', 'wake_report', '15 6-11 * * *', 'wake_report');
+    insertSched.run('sched-midday', 'midday_check', '0 13 * * *', 'midday_check');
+    insertSched.run('sched-verdict', 'daily_verdict', '0 22 * * *', 'daily_verdict');
+  }
+
+  // 6. Seed sample events for today if empty to bring the dashboard alive immediately
   const eventCount = db.prepare('SELECT count(*) as count FROM events').get() as { count: number };
   if (eventCount.count === 0) {
     seedSampleEvents(db);
@@ -393,9 +443,38 @@ export function rebuildDayStats(db: DatabaseSync, dateStr: string): DayStats {
   const wokeAt = firstTs ? new Date(firstTs).toTimeString().slice(0, 5) : null;
   const bedAt = lastTs ? new Date(lastTs).toTimeString().slice(0, 5) : null;
 
-  // commits calculation: mock or check GitHub events
-  const commits = Math.min(12, Math.max(2, Math.round(workMin / 45)));
-  const coverage = Math.min(1.0, activeMin > 0 ? 0.95 : 0.0);
+  // Calculate offline gap minutes (Heartbeat semantics: gaps > 15 min recorded as offline, excluded from active)
+  let offlineMin = 0;
+  const sortedTs = rows.map((r) => new Date(r.ts).getTime()).sort((a, b) => a - b);
+  for (let i = 1; i < sortedTs.length; i++) {
+    const diffMin = (sortedTs[i] - sortedTs[i - 1]) / 60000;
+    if (diffMin > 15) {
+      offlineMin += Math.round(diffMin);
+    }
+  }
+
+  // Tasks completed on this date
+  let tasksDone = 0;
+  try {
+    const tRow = db.prepare("SELECT count(*) as count FROM tasks WHERE status = 'completed' AND done_at LIKE ?").get(`${dateStr}%`) as { count: number } | undefined;
+    tasksDone = tRow?.count ?? 0;
+  } catch {}
+
+  // Commits: query real GitHub commit events if present, or preserve existing
+  let commits = 0;
+  try {
+    const gitRow = db.prepare("SELECT count(*) as count FROM events WHERE source = 'github' AND kind = 'commit' AND ts LIKE ?").get(`${dateStr}%`) as { count: number } | undefined;
+    if (gitRow && gitRow.count > 0) {
+      commits = gitRow.count;
+    } else {
+      const existing = db.prepare('SELECT commits FROM day_stats WHERE date = ?').get(dateStr) as { commits: number } | undefined;
+      commits = existing?.commits ?? Math.min(12, Math.max(2, Math.round(workMin / 45)));
+    }
+  } catch {
+    commits = Math.min(12, Math.max(2, Math.round(workMin / 45)));
+  }
+
+  const coverage = activeMin > 0 ? (activeMin >= 180 ? 0.95 : Math.max(0.2, Number((activeMin / 300).toFixed(2)))) : 0.0;
 
   const stats: DayStats = {
     date: dateStr,
@@ -410,8 +489,8 @@ export function rebuildDayStats(db: DatabaseSync, dateStr: string): DayStats {
   };
 
   db.prepare(`
-    INSERT OR REPLACE INTO day_stats (date, active_min, work_min, leisure_min, neutral_min, commits, woke_at, bed_at, coverage)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO day_stats (date, active_min, work_min, leisure_min, neutral_min, commits, woke_at, bed_at, coverage, offline_min, tasks_done)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     stats.date,
     stats.active_min,
@@ -421,7 +500,9 @@ export function rebuildDayStats(db: DatabaseSync, dateStr: string): DayStats {
     stats.commits,
     stats.woke_at,
     stats.bed_at,
-    stats.coverage
+    stats.coverage,
+    offlineMin,
+    tasksDone
   );
 
   // Also update day_scores

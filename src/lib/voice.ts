@@ -3,7 +3,7 @@
 let currentAudio: HTMLAudioElement | null = null;
 let currentUtterance: SpeechSynthesisUtterance | null = null;
 let audioContext: AudioContext | null = null;
-let analyserNode: AnalyserNode | null = null;
+let isAudioUnlocked = false;
 
 export interface SpeakOptions {
   voiceId?: string;
@@ -13,6 +13,38 @@ export interface SpeakOptions {
   onError?: (err: unknown) => void;
 }
 
+/**
+ * Audio Unlocker: Initializes and resumes AudioContext on the first user interaction
+ * so proactive audio can play without autoplay blocks.
+ */
+export function unlockAudio() {
+  if (isAudioUnlocked || typeof window === 'undefined') return;
+
+  try {
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (AudioCtx) {
+      if (!audioContext) {
+        audioContext = new AudioCtx();
+      }
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+      // Play a short silent buffer
+      const buffer = audioContext.createBuffer(1, 1, 22050);
+      const source = audioContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioContext.destination);
+      source.start(0);
+      isAudioUnlocked = true;
+    }
+  } catch (e) {
+    console.debug('AudioContext unlock failed:', e);
+  }
+}
+
+/**
+ * Barge-in / interruption: Instantly halt any active audio or browser speech playback.
+ */
 export function stopSpeaking() {
   if (currentAudio) {
     currentAudio.pause();
@@ -26,8 +58,8 @@ export function stopSpeaking() {
 }
 
 /**
- * Robust Speech Synthesis: Tries ElevenLabs via /api/tts first,
- * seamlessly falls back to highest-quality browser neural speech synthesis.
+ * Robust Speech Synthesis: Tries ElevenLabs via /api/tts first (with disk cache),
+ * falls back cleanly to browser speech synthesis.
  */
 export async function speakSofia(
   text: string,
@@ -40,10 +72,10 @@ export async function speakSofia(
 
   if (!cleanText) return;
 
+  unlockAudio();
   stopSpeaking();
 
   try {
-    // 1. Try ElevenLabs API endpoint
     const storedKey = typeof window !== 'undefined' ? localStorage.getItem('sofia_elevenlabs_key') : null;
     const storedVoice = typeof window !== 'undefined' ? localStorage.getItem('sofia_elevenlabs_voice_id') : null;
 
@@ -80,7 +112,7 @@ export async function speakSofia(
       return;
     }
 
-    // If server responded with JSON fallback
+    // Server returned JSON fallback
     fallbackBrowserSpeech(cleanText, options);
   } catch (err) {
     console.warn('ElevenLabs fetch failed, using browser fallback:', err);
@@ -105,7 +137,6 @@ function fallbackBrowserSpeech(text: string, options: SpeakOptions = {}) {
     const voices = window.speechSynthesis.getVoices();
     if (!voices || voices.length === 0) return null;
 
-    // Prioritize natural / neural female English voices
     const preferred = voices.find(
       (v) =>
         v.lang.startsWith('en') &&
@@ -125,7 +156,6 @@ function fallbackBrowserSpeech(text: string, options: SpeakOptions = {}) {
   if (voice) {
     utterance.voice = voice;
   } else {
-    // If voices haven't loaded yet in Chromium
     window.speechSynthesis.onvoiceschanged = () => {
       const v = selectVoice();
       if (v) utterance.voice = v;

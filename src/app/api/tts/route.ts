@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase, getSettings } from '@/lib/db';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,11 +20,33 @@ export async function POST(req: NextRequest) {
       settings.voice.elevenlabs_api_key ||
       process.env.ELEVENLABS_API_KEY;
 
-    // Default to Rachel (smooth, composed female voice) or requested voiceId
+    // Default to Rachel or configured voice
     const voiceId =
       body.voiceId ||
       settings.voice.elevenlabs_voice_id ||
       '21m00Tcm4TlvDq8ikWAM';
+
+    // Hash check for local disk cache
+    const hash = crypto
+      .createHash('sha256')
+      .update(`${voiceId}:${text}`)
+      .digest('hex');
+
+    const cacheDir = path.join(process.cwd(), 'data', 'audio');
+    const cachedFilePath = path.join(cacheDir, `${hash}.mp3`);
+
+    if (fs.existsSync(cachedFilePath)) {
+      const cachedBuffer = fs.readFileSync(cachedFilePath);
+      return new NextResponse(cachedBuffer, {
+        status: 200,
+        headers: {
+          'Content-Type': 'audio/mpeg',
+          'Content-Length': cachedBuffer.byteLength.toString(),
+          'Cache-Control': 'public, max-age=86400',
+          'X-TTS-Cache': 'HIT',
+        },
+      });
+    }
 
     if (!apiKey) {
       return NextResponse.json(
@@ -68,13 +93,25 @@ export async function POST(req: NextRequest) {
     }
 
     const audioArrayBuffer = await elevenRes.arrayBuffer();
+    const audioBuffer = Buffer.from(audioArrayBuffer);
+
+    // Save to cache dir
+    try {
+      if (!fs.existsSync(cacheDir)) {
+        fs.mkdirSync(cacheDir, { recursive: true });
+      }
+      fs.writeFileSync(cachedFilePath, audioBuffer);
+    } catch (writeErr) {
+      console.warn('Failed to cache TTS audio:', writeErr);
+    }
 
     return new NextResponse(audioArrayBuffer, {
       status: 200,
       headers: {
         'Content-Type': 'audio/mpeg',
         'Content-Length': audioArrayBuffer.byteLength.toString(),
-        'Cache-Control': 'public, max-age=3600',
+        'Cache-Control': 'public, max-age=86400',
+        'X-TTS-Cache': 'MISS',
       },
     });
   } catch (err) {

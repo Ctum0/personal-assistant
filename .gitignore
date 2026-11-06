@@ -42,3 +42,6 @@ next-env.d.ts
 .next-server.log
 data/*.db
 data/*.db-journal
+data/audio/
+data/backups/
+

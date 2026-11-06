@@ -221,6 +221,19 @@
   animation: jarvis-pulse 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+@keyframes sofia-bob {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.animate-sofia-bob {
+  animation: sofia-bob 3.8s ease-in-out infinite;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
