@@ -6,8 +6,8 @@ let audioContext: AudioContext | null = null;
 let isAudioUnlocked = false;
 
 export interface SpeakOptions {
+  provider?: string;
   voiceId?: string;
-  apiKey?: string;
   onStart?: () => void;
   onEnd?: () => void;
   onError?: (err: unknown) => void;
@@ -15,13 +15,15 @@ export interface SpeakOptions {
 
 /**
  * Audio Unlocker: Initializes and resumes AudioContext on the first user interaction
- * so proactive audio can play without autoplay blocks.
+ * so speech playback is unlocked across mobile and desktop browsers.
  */
 export function unlockAudio() {
   if (isAudioUnlocked || typeof window === 'undefined') return;
 
   try {
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (AudioCtx) {
       if (!audioContext) {
         audioContext = new AudioCtx();
@@ -29,7 +31,6 @@ export function unlockAudio() {
       if (audioContext.state === 'suspended') {
         audioContext.resume();
       }
-      // Play a short silent buffer
       const buffer = audioContext.createBuffer(1, 1, 22050);
       const source = audioContext.createBufferSource();
       source.buffer = buffer;
@@ -58,8 +59,9 @@ export function stopSpeaking() {
 }
 
 /**
- * Robust Speech Synthesis: Tries ElevenLabs via /api/tts first (with disk cache),
- * falls back cleanly to browser speech synthesis.
+ * Robust Speech Synthesis:
+ * Calls /api/tts (Edge TTS by default, or ElevenLabs if configured & within budget).
+ * Falls back cleanly to high-quality browser speech synthesis on network failure.
  */
 export async function speakSofia(
   text: string,
@@ -76,16 +78,13 @@ export async function speakSofia(
   stopSpeaking();
 
   try {
-    const storedKey = typeof window !== 'undefined' ? localStorage.getItem('sofia_elevenlabs_key') : null;
-    const storedVoice = typeof window !== 'undefined' ? localStorage.getItem('sofia_elevenlabs_voice_id') : null;
-
     const res = await fetch('/api/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text: cleanText,
-        voiceId: options.voiceId || storedVoice || undefined,
-        apiKey: options.apiKey || storedKey || undefined,
+        provider: options.provider,
+        voiceId: options.voiceId,
       }),
     });
 
@@ -112,10 +111,9 @@ export async function speakSofia(
       return;
     }
 
-    // Server returned JSON fallback
     fallbackBrowserSpeech(cleanText, options);
   } catch (err) {
-    console.warn('ElevenLabs fetch failed, using browser fallback:', err);
+    console.warn('/api/tts fetch failed, using browser fallback:', err);
     fallbackBrowserSpeech(cleanText, options);
   }
 }
@@ -131,25 +129,36 @@ function fallbackBrowserSpeech(text: string, options: SpeakOptions = {}) {
   const utterance = new SpeechSynthesisUtterance(text);
   currentUtterance = utterance;
   utterance.rate = 1.02;
-  utterance.pitch = 1.05;
+  utterance.pitch = 1.15;
 
   const selectVoice = () => {
     const voices = window.speechSynthesis.getVoices();
     if (!voices || voices.length === 0) return null;
 
-    const preferred = voices.find(
+    // Preferred voices in order
+    const priorityNames = [
+      'Google UK English Female',
+      'Google US English',
+      'Samantha',
+      'Victoria',
+    ];
+
+    for (const name of priorityNames) {
+      const matched = voices.find((v) => v.name.includes(name));
+      if (matched) return matched;
+    }
+
+    const femaleEn = voices.find(
       (v) =>
         v.lang.startsWith('en') &&
-        (v.name.includes('Neural') ||
-          v.name.includes('Natural') ||
+        (v.name.toLowerCase().includes('female') ||
           v.name.includes('Jenny') ||
-          v.name.includes('Samantha') ||
-          v.name.includes('Victoria') ||
-          v.name.includes('Google UK English Female') ||
-          v.name.includes('Female'))
+          v.name.includes('Aria') ||
+          v.name.includes('Neural'))
     );
+    if (femaleEn) return femaleEn;
 
-    return preferred || voices.find((v) => v.lang.startsWith('en')) || voices[0];
+    return voices.find((v) => v.lang.startsWith('en')) || voices[0];
   };
 
   const voice = selectVoice();

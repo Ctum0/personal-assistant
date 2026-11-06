@@ -139,6 +139,14 @@ function initDatabase(db: DatabaseSync) {
       kind TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS tts_usage (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      chars INTEGER NOT NULL,
+      month TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS schedules (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
