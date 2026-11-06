@@ -69,31 +69,34 @@ export default function Sofia3DCanvas({
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 0.82; // Mysterious, eye-friendly, velvet cinematic tone
+    renderer.toneMappingExposure = 1.05; // Balanced, true-texture studio exposure
     rendererRef.current = renderer;
 
-    // Mysterious, Eye-Friendly Luxury Studio Lighting Setup
-    // Soft Warm Ivory Key Light (calibrated intensity preserves facial details, eye gradients, and cheek blush)
-    const keyLight = new THREE.DirectionalLight(0xfff0ea, 0.95);
-    keyLight.position.set(1.0, 2.0, 1.5);
+    // Studio Light Balancing & Skin Tone Restoration (Fix Red Tint)
+    // 1. Front Key Light: Clean neutral-cool studio white (#F4F6FB, intensity 1.35) at [1, 2, 2]
+    // Illuminates face, skin, and clothing true to original textures without color contamination
+    const keyLight = new THREE.DirectionalLight(0xf4f6fb, 1.35);
+    keyLight.position.set(1.0, 2.0, 2.0);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.width = 1024;
     keyLight.shadow.mapSize.height = 1024;
     keyLight.shadow.bias = -0.0004;
     scene.add(keyLight);
 
-    // Moody Crimson-Rose Silhouette Rim Light (highlights hair silhouette without washing out face)
-    const rimLight = new THREE.DirectionalLight(0xe11d48, 1.25);
-    rimLight.position.set(-1.3, 1.8, -1.3);
-    scene.add(rimLight);
-
-    // Deep Nocturnal Wine Fill Light (soft shadow illumination)
-    const fillLight = new THREE.DirectionalLight(0x881337, 0.35);
-    fillLight.position.set(-0.8, 1.0, 1.2);
+    // 2. Soft Front Fill Light: Clean neutral ambient/fill (#EDEEF5, intensity 0.60) at [-0.9, 1.0, 1.8]
+    // Softens shadows under the chin without tinting the skin
+    const fillLight = new THREE.DirectionalLight(0xedeef5, 0.60);
+    fillLight.position.set(-0.9, 1.0, 1.8);
     scene.add(fillLight);
 
-    // Subtle Overhead Sky Warmth & Velvet Shadow Base
-    const hemiLight = new THREE.HemisphereLight(0xfecdd3, 0x050103, 0.35);
+    // 3. Isolated Burgundy Rim/Hair Light BEHIND character ([0, 2, -2], color deep wine #8b0024, intensity 2.80)
+    // Catches edges of hair and shoulders with luxury burgundy silhouette without casting red onto face or front clothing
+    const rimLight = new THREE.DirectionalLight(0x8b0024, 2.80);
+    rimLight.position.set(0.0, 2.0, -2.0);
+    scene.add(rimLight);
+
+    // 4. Clean Neutral Overhead Hemisphere Light (white sky, dark velvet floor)
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x080205, 0.45);
     scene.add(hemiLight);
 
     // Load High-Fidelity VRM Digital Human

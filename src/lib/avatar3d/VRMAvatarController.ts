@@ -151,9 +151,6 @@ export class VRMAvatarController {
           // Initialize relaxed A-pose
           this.setNaturalAPose(vrm);
 
-          // Initialize ambient particle field
-          this.initAmbientParticles(scene);
-
           scene.add(vrm.scene);
           options.onLoaded?.(vrm);
           resolve(vrm);
@@ -689,10 +686,7 @@ export class VRMAvatarController {
       this.vrm?.expressionManager?.setValue(vKey as VRMExpressionPresetName, this.currentVisemes[vKey]);
     });
 
-    // 7. Update Ambient Depth-of-Field Embers
-    this.updateParticles(dt, elapsedTime);
-
-    // 8. Update VRM Runtime (MToon shaders & secondary SpringBone hair physics!)
+    // 7. Update VRM Runtime (MToon shaders & secondary SpringBone hair physics!)
     this.vrm.update(dt);
   }
 }

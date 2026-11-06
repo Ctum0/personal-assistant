@@ -42,6 +42,112 @@ interface Sofia3DStageProps {
   voiceProvider: string;
 }
 
+interface GlobalParticleFieldProps {
+  isSpeaking: boolean;
+}
+
+const GlobalParticleField: React.FC<GlobalParticleFieldProps> = ({ isSpeaking }) => {
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animId: number;
+    let width = (canvas.width = window.innerWidth);
+    let height = (canvas.height = window.innerHeight);
+
+    const handleResize = () => {
+      if (!canvas) return;
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+    };
+    window.addEventListener('resize', handleResize);
+
+    // Particle pool: 50 bokeh motes
+    // Colors: deep ruby (139, 21, 56), rose champagne (232, 197, 208), faint gold (245, 208, 169)
+    const colors = [
+      { r: 139, g: 21, b: 56 },   // deep ruby
+      { r: 232, g: 197, b: 208 }, // rose champagne
+      { r: 245, g: 208, b: 169 }, // faint gold
+    ];
+
+    const particles = Array.from({ length: 50 }, () => {
+      const col = colors[Math.floor(Math.random() * colors.length)];
+      return {
+        x: Math.random() * width,
+        y: Math.random() * height,
+        radius: Math.random() * 2.2 + 1.2,
+        baseSpeedY: Math.random() * 0.45 + 0.2,
+        phase: Math.random() * Math.PI * 2,
+        freq: Math.random() * 0.015 + 0.008,
+        amplitude: Math.random() * 1.5 + 0.8,
+        color: col,
+        baseAlpha: Math.random() * 0.25 + 0.2, // 0.2 to 0.45
+      };
+    });
+
+    let prevTime = performance.now();
+
+    const render = (time: number) => {
+      const dt = Math.min((time - prevTime) / 1000, 0.1);
+      prevTime = time;
+
+      ctx.clearRect(0, 0, width, height);
+
+      const speedMultiplier = isSpeaking ? 1.45 : 1.0;
+      const alphaBoost = isSpeaking ? 0.12 : 0.0;
+
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        p.phase += p.freq;
+        p.x += Math.sin(p.phase) * p.amplitude;
+        p.y -= p.baseSpeedY * speedMultiplier * (dt * 60);
+
+        // Wrap around smoothly
+        if (p.y < -10) {
+          p.y = height + 10;
+          p.x = Math.random() * width;
+        }
+        if (p.x < -20) p.x = width + 20;
+        if (p.x > width + 20) p.x = -20;
+
+        const currentAlpha = Math.min(0.65, p.baseAlpha + alphaBoost);
+
+        // Draw soft glowing bokeh circle
+        const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius * 2);
+        grad.addColorStop(0, `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${currentAlpha})`);
+        grad.addColorStop(0.5, `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${currentAlpha * 0.5})`);
+        grad.addColorStop(1, `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, 0)`);
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius * 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      animId = requestAnimationFrame(render);
+    };
+
+    animId = requestAnimationFrame(render);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      cancelAnimationFrame(animId);
+    };
+  }, [isSpeaking]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="fixed inset-0 pointer-events-none z-0"
+      aria-hidden="true"
+    />
+  );
+};
+
 export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
   expression = 'focused',
   isSpeaking,
@@ -110,17 +216,20 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
   };
 
   return (
-    <div className="relative w-full h-screen max-h-screen flex flex-col justify-between items-center overflow-hidden select-none bg-[#050104] bg-[radial-gradient(circle_at_50%_40%,rgba(32,4,18,0.72)_0%,rgba(16,2,10,0.85)_45%,rgba(5,1,4,1.0)_85%)]">
-      {/* 0. Ambient Nocturne Cosmic Nebula Atmosphere (Luxury Obsidian & Rose-Quartz Bloom) */}
+    <div className="relative w-full h-screen max-h-screen flex flex-col justify-between items-center overflow-hidden select-none bg-[#040103] bg-[radial-gradient(circle_at_50%_38%,rgba(61,3,20,0.65)_0%,rgba(21,1,7,0.45)_45%,rgba(4,1,3,1.0)_85%)]">
+      {/* 0. Full-Screen Global Bokeh Particle Field */}
+      <GlobalParticleField isSpeaking={isSpeaking} />
+
+      {/* 0. Ambient Nocturne Velvet Burgundy Aurora & Breathing Glow */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-0" aria-hidden="true">
-        {/* Soft Nocturnal Wine/Rose-Quartz Radial Bloom centered directly behind character's upper silhouette */}
-        <div className="absolute top-[32%] left-[50%] -translate-x-1/2 -translate-y-1/2 w-[580px] h-[580px] rounded-full bg-[radial-gradient(circle,rgba(40,6,24,0.45)_0%,rgba(20,3,12,0.22)_48%,transparent_75%)] blur-[85px] animate-pulse-slow" />
+        {/* Full-screen Velvet Cabernet breathing aurora centered behind Sofia */}
+        <div className="absolute top-[38%] left-[50%] -translate-x-1/2 -translate-y-1/2 w-[750px] h-[750px] sm:w-[900px] sm:h-[900px] rounded-full bg-[radial-gradient(circle,rgba(61,3,20,0.55)_0%,rgba(21,1,7,0.35)_45%,transparent_75%)] blur-[90px] animate-breathing-aurora" />
 
         {/* Nebula Cloud 1: Deep Wine Aurora */}
-        <div className="absolute top-[10%] left-[15%] w-[640px] h-[640px] rounded-full bg-[radial-gradient(circle,rgba(90,10,38,0.25)_0%,rgba(50,5,22,0.12)_45%,transparent_70%)] blur-[100px] animate-nebula-1" />
+        <div className="absolute top-[10%] left-[12%] w-[640px] h-[640px] rounded-full bg-[radial-gradient(circle,rgba(90,10,38,0.20)_0%,rgba(50,5,22,0.10)_45%,transparent_70%)] blur-[100px] animate-nebula-1" />
         
         {/* Nebula Cloud 2: Cosmic Midnight Aurora */}
-        <div className="absolute bottom-[8%] right-[12%] w-[680px] h-[680px] rounded-full bg-[radial-gradient(circle,rgba(45,6,50,0.22)_0%,rgba(22,3,28,0.10)_50%,transparent_70%)] blur-[110px] animate-nebula-2" />
+        <div className="absolute bottom-[8%] right-[10%] w-[680px] h-[680px] rounded-full bg-[radial-gradient(circle,rgba(45,6,50,0.18)_0%,rgba(22,3,28,0.08)_50%,transparent_70%)] blur-[110px] animate-nebula-2" />
       </div>
 
       {/* 1. Top Minimal Luxury Header */}
@@ -129,7 +238,7 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
           <span className="text-sm font-sans tracking-[0.25em] font-light text-rose-100/90 uppercase">
             Sofia
           </span>
-          <span className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-rose-950/40 border border-rose-500/20 text-[10px] font-mono text-rose-300">
+          <span className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-rose-950/40 border border-[#8b1538]/30 text-[10px] font-mono text-rose-300">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
             <span>Hermes Active</span>
           </span>
@@ -139,7 +248,7 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
         <button
           onClick={() => setDrawerOpen(true)}
           title="Open Command Console (⌘K)"
-          className="flex items-center space-x-2 px-3.5 py-1.5 rounded-full backdrop-blur-2xl bg-white/[0.03] hover:bg-white/[0.07] border border-rose-500/15 hover:border-rose-400/30 text-rose-200/80 hover:text-white transition-all text-xs font-mono shadow-lg"
+          className="flex items-center space-x-2 px-3.5 py-1.5 rounded-full backdrop-blur-2xl bg-[#0d0207]/40 hover:bg-white/[0.07] border border-[#8b1538]/25 hover:border-rose-400/40 text-rose-200/90 hover:text-white transition-all text-xs font-mono shadow-[0_8px_32px_0_rgba(0,0,0,0.6)]"
         >
           <SlidersHorizontal className="w-3.5 h-3.5 text-rose-300" aria-hidden="true" />
           <span className="hidden sm:inline">Console</span>
@@ -165,10 +274,10 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
 
           {/* Holographic Circular Portal Dais */}
           <div 
-            className={`w-[360px] h-[360px] sm:w-[440px] sm:h-[440px] md:w-[480px] md:h-[480px] lg:w-[520px] lg:h-[520px] xl:w-[540px] xl:h-[540px] rounded-full relative overflow-hidden flex items-center justify-center transition-all duration-500 backdrop-blur-2xl bg-gradient-to-b from-[#14030d]/80 via-[#050104]/90 to-[#14030d]/80 ${
+            className={`w-[360px] h-[360px] sm:w-[440px] sm:h-[440px] md:w-[480px] md:h-[480px] lg:w-[520px] lg:h-[520px] xl:w-[540px] xl:h-[540px] rounded-full relative overflow-hidden flex items-center justify-center transition-all duration-500 backdrop-blur-2xl bg-[#0d0207]/40 shadow-[0_8px_32px_0_rgba(0,0,0,0.6)] ${
               isSpeaking
-                ? 'border border-rose-400/35 shadow-[0_0_80px_rgba(244,63,94,0.28)]'
-                : 'border border-rose-500/20 shadow-[0_0_60px_rgba(225,29,72,0.15)]'
+                ? 'border border-rose-400/40 shadow-[0_0_80px_rgba(244,63,94,0.30)]'
+                : 'border border-[#8b1538]/25 shadow-[0_8px_32px_0_rgba(0,0,0,0.6),0_0_50px_rgba(139,21,56,0.15)]'
             }`}
           >
             {/* Luminous Eclipse Aura & Deep Velvet Gradient BEHIND Sofia (z-0) */}
@@ -206,10 +315,10 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
           className="text-center max-w-xl min-h-[48px] flex flex-col items-center justify-center px-4 cursor-pointer group"
         >
           <p 
-            className={`text-sm sm:text-base font-sans tracking-[0.03em] leading-relaxed transition-all duration-500 ${
+            className={`text-sm sm:text-base font-sans tracking-[0.04em] leading-relaxed transition-all duration-500 ${
               isSpeaking
                 ? 'text-white font-normal drop-shadow-[0_0_15px_rgba(255,220,235,0.7)]'
-                : 'text-[#f5e6eb]/90 font-light group-hover:text-white'
+                : 'text-[#f5e6eb] font-light group-hover:text-white'
             }`}
           >
             &ldquo;{dialogue}&rdquo;
@@ -232,8 +341,8 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
           </div>
         </div>
 
-        {/* Sleek Minimalist Glass Command Dock */}
-        <div className="w-full backdrop-blur-3xl bg-rose-950/20 border border-rose-500/30 rounded-full px-3.5 sm:px-4 py-2 shadow-[0_12px_40px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,200,225,0.15)] flex items-center gap-2.5 transition-all focus-within:border-rose-400/50 focus-within:bg-rose-950/30">
+        {/* Sleek Minimalist Ultra-Clean Frosted Dark Glass Command Dock */}
+        <div className="w-full backdrop-blur-2xl bg-[#0d0207]/40 border border-[#8b1538]/30 rounded-full px-3.5 sm:px-4 py-2 shadow-[0_8px_32px_0_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,200,225,0.12)] flex items-center gap-2.5 transition-all focus-within:border-rose-400/50 focus-within:bg-[#12030a]/60">
           {/* Voice Talk Microphone Button */}
           <button
             onClick={isListening ? onStopListening : onStartListening}
