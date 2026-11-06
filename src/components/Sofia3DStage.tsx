@@ -275,7 +275,7 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
           />
 
           {/* 3D Canvas Stage: Weightless Holographic Dissolve Stage */}
-          <div className="relative w-full h-[460px] sm:h-[500px] md:h-[540px] flex items-center justify-center z-10 overflow-visible">
+          <div className="relative w-full h-[420px] sm:h-[460px] md:h-[480px] flex items-center justify-center z-10 overflow-visible">
             <Sofia3DCanvas
               expression={expression}
               isSpeaking={isSpeaking}
@@ -284,54 +284,57 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
             />
 
             {/* 3. Razor-Thin Luminous Horizon Beam (1px Glow Line) */}
-            {/* Anchored at the holographic dissolve threshold directly below torso */}
+            {/* Audio-reactive pulse modulation: scales width and bloom when speaking */}
             <div 
-              className="absolute bottom-1 left-1/2 -translate-x-1/2 w-[320px] sm:w-[380px] h-[1px] pointer-events-none z-20"
+              className={`absolute bottom-0 left-1/2 -translate-x-1/2 h-[1px] pointer-events-none z-20 transition-all duration-300 ease-out ${
+                isSpeaking
+                  ? 'w-[360px] sm:w-[420px] shadow-[0_0_18px_rgba(225,29,72,0.7),0_0_6px_rgba(255,200,220,0.9)] animate-pulse'
+                  : 'w-[320px] sm:w-[380px] shadow-[0_0_12px_rgba(225,29,72,0.4),0_0_4px_rgba(255,200,220,0.6)]'
+              }`}
               style={{
                 background: 'linear-gradient(90deg, transparent 0%, rgba(225, 29, 72, 0.7) 35%, rgba(255, 200, 220, 0.95) 50%, rgba(225, 29, 72, 0.7) 65%, transparent 100%)',
-                boxShadow: '0 0 12px rgba(225, 29, 72, 0.4), 0 0 4px rgba(255, 200, 220, 0.6)',
               }}
               aria-hidden="true"
             />
           </div>
+
+          {/* 4. Live Spoken Dialogue Caption: Lifted to sit cleanly 32px (mt-8) below Sofia's projection line */}
+          <div 
+            onClick={isSpeaking ? onInterrupt : () => onSpeak(dialogue)}
+            title={isSpeaking ? "Click to interrupt" : "Click to replay audio"}
+            className="text-center max-w-xl min-h-[44px] flex flex-col items-center justify-center px-4 cursor-pointer group mt-8 z-10"
+          >
+            <p 
+              className={`text-base font-sans tracking-wide leading-relaxed font-medium transition-all duration-300 ease-out ${
+                isSpeaking
+                  ? 'text-[#fbf5f7] drop-shadow-[0_0_15px_rgba(255,220,235,0.7)] scale-[1.01]'
+                  : 'text-[#fbf5f7]/90 group-hover:text-white'
+              }`}
+            >
+              &ldquo;{dialogue}&rdquo;
+            </p>
+
+            {/* Micro Audio Equalizer Frequency Bars */}
+            <div className="flex items-center space-x-1 h-3 mt-2" aria-hidden="true">
+              {[4, 12, 18, 14, 8, 16, 20, 10, 6, 14, 18, 6].map((h, i) => (
+                <span
+                  key={i}
+                  style={{
+                    height: isSpeaking || isListening ? `${h * 0.55}px` : '2px',
+                    transition: 'height 0.15s ease',
+                  }}
+                  className={`w-0.5 rounded-full ${
+                    isSpeaking ? 'bg-rose-400' : isListening ? 'bg-cyan-400' : 'bg-rose-950/50'
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* 3. Bottom Subtitle Dialogue Line & Minimal Glassy Command Dock */}
-      <section aria-label="Spoken Dialogue and Command Dock" className="relative z-20 w-full max-w-2xl px-4 pb-5 sm:pb-6 flex flex-col items-center space-y-3 shrink-0">
-        {/* Real-time Subtitle Dialogue Line — positioned cleanly 28px below datum line */}
-        <div 
-          onClick={isSpeaking ? onInterrupt : () => onSpeak(dialogue)}
-          title={isSpeaking ? "Click to interrupt" : "Click to replay audio"}
-          className="text-center max-w-xl min-h-[44px] flex flex-col items-center justify-center px-4 cursor-pointer group mt-[28px]"
-        >
-          <p 
-            className={`text-sm sm:text-base font-sans tracking-[0.04em] leading-relaxed transition-all duration-500 ${
-              isSpeaking
-                ? 'text-white font-normal drop-shadow-[0_0_15px_rgba(255,220,235,0.7)]'
-                : 'text-[#f5e6eb] font-light group-hover:text-white'
-            }`}
-          >
-            &ldquo;{dialogue}&rdquo;
-          </p>
-
-          {/* Micro Audio Equalizer Frequency Bars */}
-          <div className="flex items-center space-x-1 h-3 mt-1.5" aria-hidden="true">
-            {[4, 12, 18, 14, 8, 16, 20, 10, 6, 14, 18, 6].map((h, i) => (
-              <span
-                key={i}
-                style={{
-                  height: isSpeaking || isListening ? `${h * 0.55}px` : '2px',
-                  transition: 'height 0.15s ease',
-                }}
-                className={`w-0.5 rounded-full ${
-                  isSpeaking ? 'bg-rose-400' : isListening ? 'bg-cyan-400' : 'bg-rose-950/50'
-                }`}
-              />
-            ))}
-          </div>
-        </div>
-
+      {/* 3. Bottom Minimal Glassy Command Dock — anchored cleanly at bottom-8 with breathing room */}
+      <section aria-label="Command Dock" className="relative z-20 w-full max-w-2xl px-4 pb-8 flex flex-col items-center shrink-0">
         {/* Sleek Minimalist Ultra-Clean Frosted Dark Glass Command Dock */}
         <div className="w-full backdrop-blur-2xl bg-[#0d0207]/40 border border-[#8b1538]/30 rounded-full px-3.5 sm:px-4 py-2 shadow-[0_8px_32px_0_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,200,225,0.12)] flex items-center gap-2.5 transition-all focus-within:border-rose-400/50 focus-within:bg-[#12030a]/60">
           {/* Voice Talk Microphone Button */}
