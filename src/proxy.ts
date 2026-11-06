@@ -1,16 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyApiAuth } from './lib/auth';
 
 export function proxy(req: NextRequest) {
-  const authToken = process.env.SOFIA_AUTH_TOKEN;
-
-  // If no auth token is configured, allow local access freely
-  if (!authToken) {
-    return NextResponse.next();
-  }
-
   const { pathname } = req.nextUrl;
 
-  // Allow static assets, health check, and public expression images
+  // Static assets and public health check are always allowed
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/sofia') ||
@@ -21,31 +15,27 @@ export function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check Authorization header or cookie
+  // Enforce API token on all /api/* routes
+  if (pathname.startsWith('/api')) {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
+    return NextResponse.next();
+  }
+
+  // For non-API routes, check single-user token if SOFIA_API_TOKEN is set
+  const expectedToken = process.env.SOFIA_API_TOKEN || process.env.SOFIA_AUTH_TOKEN;
+  if (!expectedToken) {
+    return NextResponse.next();
+  }
+
   const authHeader = req.headers.get('authorization');
   const cookieToken = req.cookies.get('sofia_token')?.value;
-  const token = authHeader?.replace('Bearer ', '') || cookieToken;
+  const token = authHeader?.replace(/^Bearer\s+/i, '').trim() || cookieToken;
 
-  if (token === authToken) {
+  if (token === expectedToken) {
     return NextResponse.next();
-  }
-
-  // Device collector token bypass for ingest routes
-  const deviceToken = req.headers.get('x-device-token');
-  const expectedDeviceToken = process.env.DEVICE_TOKEN;
-  if (pathname.startsWith('/api/ingest') && expectedDeviceToken && deviceToken === expectedDeviceToken) {
-    return NextResponse.next();
-  }
-
-  // Cron secret bypass for cron routes
-  const cronSecret = req.headers.get('x-cron-secret');
-  const expectedCronSecret = process.env.CRON_SECRET;
-  if (pathname.startsWith('/api/cron') && expectedCronSecret && cronSecret === expectedCronSecret) {
-    return NextResponse.next();
-  }
-
-  if (pathname.startsWith('/api')) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
   return new NextResponse('Unauthorized: Sofia is single-user.', { status: 401 });

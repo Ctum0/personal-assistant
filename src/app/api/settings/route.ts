@@ -1,22 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase, getSettings, updateSettings } from '@/lib/db';
 
-function redactSecrets(settings: any) {
-  const redacted = JSON.parse(JSON.stringify(settings));
-  if (redacted.hermes) {
-    redacted.hermes.api_key = redacted.hermes.api_key ? { set: true } : { set: false };
+function stripSecrets(settings: any) {
+  const sanitized = JSON.parse(JSON.stringify(settings));
+  if (sanitized.hermes) {
+    // Strip hermes.api_key entirely from response
+    delete sanitized.hermes.api_key;
   }
-  if (redacted.voice) {
-    redacted.voice.elevenlabs_api_key = redacted.voice.elevenlabs_api_key ? { set: true } : { set: false };
+  if (sanitized.voice) {
+    sanitized.voice.elevenlabs_api_key = sanitized.voice.elevenlabs_api_key ? { set: true } : { set: false };
   }
-  return redacted;
+  return sanitized;
 }
 
 export async function GET() {
   try {
     const db = getDatabase();
     const settings = getSettings(db);
-    return NextResponse.json(redactSecrets(settings));
+    return NextResponse.json(stripSecrets(settings));
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
@@ -28,7 +29,7 @@ export async function PUT(req: NextRequest) {
     const current = getSettings(db);
     const body = await req.json();
 
-    // Preserve secrets if redacted or missing in incoming body
+    // Preserve secrets if stripped or missing in incoming body
     if (body.hermes) {
       if (typeof body.hermes.api_key !== 'string') {
         body.hermes.api_key = current.hermes?.api_key || '';
@@ -41,7 +42,7 @@ export async function PUT(req: NextRequest) {
     }
 
     const updated = updateSettings(db, body);
-    return NextResponse.json(redactSecrets(updated));
+    return NextResponse.json(stripSecrets(updated));
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
