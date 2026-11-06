@@ -390,3 +390,37 @@
 .animate-dais-spin {
   animation: dais-spin 36s linear infinite;
 }
+
+/* Dynamic Jarvis Stage Responsive Layout */
+.stage {
+  --sofia-scale: 1;
+  --sofia-shift: 0%;
+}
+
+.stage-centre {
+  transform: scale(var(--sofia-scale)) translateX(var(--sofia-shift));
+  transition: transform 450ms cubic-bezier(0.16, 1, 0.3, 1), opacity 300ms ease;
+  transform-origin: center center;
+}
+
+@media (max-width: 767px) {
+  .stage-centre {
+    transform: scale(var(--sofia-scale)) translateX(0) !important;
+  }
+}
+
+.pane-host {
+  animation: pane-slide-in 400ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pane-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(30px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+

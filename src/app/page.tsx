@@ -1,199 +1,114 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { SofiaAvatar } from '@/components/SofiaAvatar';
-import { SofiaPanel } from '@/components/SofiaPanel';
-import { SofiaExpression, TaskItem, DayStats } from '@/lib/types';
+import React, { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
+import { Stage } from '@/components/Stage';
+import { Pane, SofiaTurn } from '@/lib/stage';
+import { SofiaExpression } from '@/lib/types';
 import { getExpressionFromMood } from '@/lib/expressions';
 import { speakSofia, stopSpeaking, unlockAudio } from '@/lib/voice';
-import { Send, Moon, BellOff, Flame, BarChart3, Database, CheckCircle2, Clock, GitCommit } from 'lucide-react';
+import { useVoiceInput } from '@/hooks/useVoiceInput';
+import {
+  Mic,
+  MicOff,
+  Send,
+  Moon,
+  Volume2,
+  VolumeX,
+  MoreHorizontal,
+  MessageSquare,
+  Clock,
+  TrendingUp,
+  CheckSquare,
+  BookOpen,
+  Settings,
+  Sparkles,
+  Bot,
+  Zap,
+} from 'lucide-react';
 
-export default function SofiaDynamicJarvisStage() {
-  const [stats, setStats] = useState<DayStats | null>(null);
-  const [score, setScore] = useState<number>(85);
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
-  const [mood, setMood] = useState<string>('ATTENTIVE');
+export default function SofiaStageHome() {
   const [expression, setExpression] = useState<SofiaExpression>('focused');
-  const [dialogue, setDialogue] = useState<string>(
-    "I am Sofia. Hermes AI engine online, voice link active. Speak to me or dispatch an action."
+  const [moodLabel, setMoodLabel] = useState('Focused');
+  const [captionText, setCaptionText] = useState(
+    "I am Sofia. I am watching your stats, your focus blocks, and your output. What are we getting done today?"
   );
-  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
-  const [isThinking, setIsThinking] = useState<boolean>(false);
-  const [inputText, setInputText] = useState<string>('');
-  const [restDay, setRestDay] = useState<boolean>(false);
-  const [mutedUntil, setMutedUntil] = useState<string | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [score, setScore] = useState(85);
+  const [panes, setPanes] = useState<Pane[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [currentTime, setCurrentTime] = useState('');
+  const [isMuted, setIsMuted] = useState(false);
+  const [isRestDay, setIsRestDay] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
-  // Dynamic Side Panels (empty by default)
-  const [leftPanel, setLeftPanel] = useState<{ title: string; content: React.ReactNode } | null>(null);
-  const [rightPanel, setRightPanel] = useState<{ title: string; content: React.ReactNode } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  const loadData = async () => {
-    try {
-      const today = new Date().toISOString().slice(0, 10);
-      const [statsRes, scoreRes, tasksRes, settingsRes] = await Promise.all([
-        fetch(`/api/stats?date=${today}`),
-        fetch(`/api/score?date=${today}`),
-        fetch('/api/tasks'),
-        fetch('/api/settings'),
-      ]);
-
-      if (statsRes.ok) {
-        const s = await statsRes.json();
-        setStats(s);
-      }
-      if (scoreRes.ok) {
-        const sc = await scoreRes.json();
-        if (sc?.score !== undefined) setScore(Math.round(sc.score));
-      }
-      if (tasksRes.ok) {
-        const t = await tasksRes.json();
-        setTasks(t);
-      }
-      if (settingsRes.ok) {
-        const set = await settingsRes.json();
-        if (set.proactivity?.rest_day !== undefined) setRestDay(set.proactivity.rest_day);
-        if (set.proactivity?.muted_until) setMutedUntil(set.proactivity.muted_until);
-      }
-    } catch (err) {
-      console.warn('Failed to load initial data:', err);
-    }
-  };
-
+  // Clock ticker
   useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 30000);
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentTime(
+        now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      );
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
 
-  // Unlock audio context on first interaction
+  // Fetch initial status and settings
   useEffect(() => {
-    const handleFirstInteraction = () => {
-      unlockAudio();
-      window.removeEventListener('click', handleFirstInteraction);
-      window.removeEventListener('keydown', handleFirstInteraction);
+    const loadInitialState = async () => {
+      try {
+        const [settingsRes, scoreRes] = await Promise.all([
+          fetch('/api/settings'),
+          fetch('/api/score'),
+        ]);
+
+        if (settingsRes.ok) {
+          const s = await settingsRes.json();
+          setIsRestDay(s.proactivity?.rest_day ?? false);
+          if (s.voice?.auto_speak === false) {
+            setIsMuted(true);
+          }
+        }
+
+        if (scoreRes.ok) {
+          const sc = await scoreRes.json();
+          if (typeof sc.score === 'number') {
+            setScore(sc.score);
+          }
+        }
+      } catch (err) {
+        console.warn('Initial state fetch error:', err);
+      }
     };
-    window.addEventListener('click', handleFirstInteraction);
-    window.addEventListener('keydown', handleFirstInteraction);
-    return () => {
-      window.removeEventListener('click', handleFirstInteraction);
-      window.removeEventListener('keydown', handleFirstInteraction);
-    };
+    loadInitialState();
   }, []);
 
-  const triggerSpeak = (text: string) => {
-    stopSpeaking();
-    speakSofia(text, {
-      onStart: () => setIsSpeaking(true),
-      onEnd: () => setIsSpeaking(false),
-      onError: () => setIsSpeaking(false),
-    });
-  };
-
-  const handleInterrupt = () => {
-    stopSpeaking();
-    setIsSpeaking(false);
-  };
-
-  // Render Tool Call Results in Sliding Side Panels
-  const handleToolResults = (toolCalls: any[]) => {
-    if (!Array.isArray(toolCalls) || toolCalls.length === 0) return;
-
-    for (const call of toolCalls) {
-      const { name, result } = call;
-
-      // Telemetry / stats / timeline tools trigger LEFT panel
-      if (name === 'get_stats' || name === 'get_timeline') {
-        setLeftPanel({
-          title: name === 'get_stats' ? 'TELEMETRY STATS' : 'TIMELINE LOG',
-          content: (
-            <div className="space-y-4">
-              <div className="glass-panel-subtle p-4 rounded-xl border border-rose-500/20 space-y-2">
-                <div className="flex justify-between items-baseline">
-                  <span className="text-xs text-rose-300">Work Logged</span>
-                  <span className="text-base font-mono font-bold text-white">
-                    {result?.stats?.work_min ?? stats?.work_min ?? 0}m
-                  </span>
-                </div>
-                <div className="flex justify-between items-baseline">
-                  <span className="text-xs text-rose-300">Leisure</span>
-                  <span className="text-base font-mono font-bold text-rose-300">
-                    {result?.stats?.leisure_min ?? stats?.leisure_min ?? 0}m
-                  </span>
-                </div>
-                <div className="flex justify-between items-baseline">
-                  <span className="text-xs text-rose-300">Commits</span>
-                  <span className="text-base font-mono font-bold text-white">
-                    {result?.stats?.commits ?? stats?.commits ?? 0}
-                  </span>
-                </div>
-                <div className="flex justify-between items-baseline">
-                  <span className="text-xs text-rose-300">Wake Time</span>
-                  <span className="text-sm font-mono text-rose-200">
-                    {result?.stats?.woke_at ?? stats?.woke_at ?? '07:30'}
-                  </span>
-                </div>
-              </div>
-              {result?.timeline && (
-                <div className="space-y-2">
-                  <span className="text-xs font-mono uppercase tracking-wider text-rose-400">Events</span>
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto text-xs font-mono">
-                    {result.timeline.slice(0, 5).map((e: any, idx: number) => (
-                      <div key={idx} className="p-2 rounded-lg bg-rose-950/40 border border-rose-500/10 flex justify-between">
-                        <span className="truncate max-w-[180px] text-white">{e.title || e.app}</span>
-                        <span className="text-rose-400/80">{Math.round(e.duration_s / 60)}m</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ),
-        });
+  // Close secondary menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
       }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
-      // Memory, tasks, and web browsing tools trigger RIGHT panel
-      if (name === 'search_memory' || name === 'list_tasks' || name === 'browse_web' || name === 'create_task') {
-        setRightPanel({
-          title: name === 'search_memory' ? 'MEMORY NOTES' : 'TASK QUEUE',
-          content: (
-            <div className="space-y-3">
-              {name === 'search_memory' && Array.isArray(result?.notes) && (
-                <div className="space-y-2">
-                  {result.notes.map((n: any, idx: number) => (
-                    <div key={idx} className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/20 text-xs">
-                      <p className="text-white font-medium mb-1">&ldquo;{n.text}&rdquo;</p>
-                      {n.tags && <span className="text-[10px] font-mono text-rose-400">{n.tags}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {(name === 'list_tasks' || name === 'create_task') && (
-                <div className="space-y-2">
-                  {tasks.map((t) => (
-                    <div key={t.id} className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/20 flex items-center justify-between text-xs">
-                      <span className={`truncate max-w-[200px] ${t.status === 'completed' ? 'line-through text-rose-400/50' : 'text-white'}`}>
-                        {t.title}
-                      </span>
-                      <span className="text-[10px] font-mono text-rose-300/70">{t.est_min}m</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ),
-        });
-      }
-    }
-  };
-
-  const handleSendPrompt = async (promptToSend?: string) => {
-    const text = (promptToSend ?? inputText).trim();
-    if (!text || isThinking) return;
+  const handleSendMessage = async (textToSend?: string) => {
+    const text = (textToSend || inputText).trim();
+    if (!text || isSending) return;
 
     setInputText('');
-    setIsThinking(true);
-    handleInterrupt();
+    setShowSuggestions(false);
+    setIsSending(true);
+    unlockAudio();
 
     try {
       const res = await fetch('/api/chat', {
@@ -202,280 +117,382 @@ export default function SofiaDynamicJarvisStage() {
         body: JSON.stringify({ message: text }),
       });
 
-      if (!res.ok) throw new Error('API failed');
+      if (!res.ok) {
+        throw new Error(`Chat API error (${res.status})`);
+      }
 
       const data = await res.json();
-      const reply = data.text || 'Command processed.';
-      setDialogue(reply);
 
-      if (data.mood) {
-        setMood(data.mood.toUpperCase());
-        setExpression(getExpressionFromMood(data.mood));
+      // Support structured SofiaTurn { say, mood, panes } or standard text
+      let turnSay = '';
+      let turnMood = 'neutral';
+      let turnPanes: Pane[] = [];
+
+      if (data && typeof data === 'object') {
+        if (data.say) {
+          turnSay = data.say;
+          turnMood = data.mood || 'neutral';
+          if (Array.isArray(data.panes)) {
+            turnPanes = data.panes;
+          }
+        } else if (data.reply || data.response || data.content) {
+          const raw = data.reply || data.response || data.content;
+          // Attempt JSON parse in case raw string is encoded JSON
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.say) {
+              turnSay = parsed.say;
+              turnMood = parsed.mood || 'neutral';
+              if (Array.isArray(parsed.panes)) turnPanes = parsed.panes;
+            } else {
+              turnSay = raw;
+            }
+          } catch {
+            turnSay = raw;
+          }
+          if (data.mood) turnMood = data.mood;
+        }
       }
 
-      if (data.toolCalls) {
-        handleToolResults(data.toolCalls);
+      if (!turnSay) {
+        turnSay = "I've processed your update.";
       }
 
-      triggerSpeak(reply);
-      loadData();
-    } catch (err) {
-      console.error('Chat failed:', err);
-      setDialogue("Failed to communicate with Hermes AI backend. Please verify proxy connectivity.");
+      // Update Sofia avatar and caption
+      const newExpression = getExpressionFromMood(turnMood);
+      setExpression(newExpression);
+      setMoodLabel(turnMood.charAt(0).toUpperCase() + turnMood.slice(1));
+      setCaptionText(turnSay);
+
+      // Mount or merge new panes
+      if (turnPanes && turnPanes.length > 0) {
+        setPanes((prev) => {
+          // Keep existing pinned panes and append new ones
+          const pinned = prev.filter((p) => p.pinned);
+          const newUnpinned = turnPanes.filter(
+            (np) => !pinned.some((p) => p.id === np.id)
+          );
+          return [...pinned, ...newUnpinned];
+        });
+      }
+
+      // Auto-speak response if not muted
+      if (!isMuted) {
+        setIsSpeaking(true);
+        await speakSofia(turnSay, {
+          onStart: () => setIsSpeaking(true),
+          onEnd: () => setIsSpeaking(false),
+          onError: () => setIsSpeaking(false),
+        });
+      }
+    } catch (err: any) {
+      console.error('Failed to communicate with Sofia:', err);
+      setCaptionText("I encountered an issue processing that. Let's try again.");
+      setExpression('concerned');
     } finally {
-      setIsThinking(false);
+      setIsSending(false);
     }
   };
 
-  const handleToggleRestDay = async () => {
-    const nextState = !restDay;
-    setRestDay(nextState);
+  // Continuous voice input hook
+  const {
+    isListening,
+    transcript,
+    interimTranscript,
+    error: voiceError,
+    toggleListening,
+    stopListening,
+  } = useVoiceInput({
+    onFinalTranscript: (text) => {
+      handleSendMessage(text);
+    },
+  });
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+      if (e.key === 'Escape') {
+        stopSpeaking();
+        setIsSpeaking(false);
+        stopListening();
+        // Dismiss unpinned panes
+        setPanes((prev) => prev.filter((p) => p.pinned));
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [stopListening]);
+
+  const handleDismissPane = (id: string) => {
+    setPanes((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  const handlePinPane = (id: string) => {
+    setPanes((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, pinned: !p.pinned } : p))
+    );
+  };
+
+  const toggleRestDay = async () => {
+    const nextVal = !isRestDay;
+    setIsRestDay(nextVal);
     try {
       await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          proactivity: {
-            rest_day: nextState,
-          },
-        }),
+        body: JSON.stringify({ proactivity: { rest_day: nextVal } }),
       });
-      const msg = nextState
-        ? "Rest day active. Midday checks suppressed; take your recovery seriously."
-        : "Rest day concluded. Returning to standard operational accountability.";
-      setDialogue(msg);
-      setMood(nextState ? 'CONCERNED' : 'FOCUSED');
-      setExpression(nextState ? 'concerned' : 'focused');
-      triggerSpeak(msg);
-    } catch (e) {
-      console.warn('Failed to toggle rest day:', e);
+      setCaptionText(
+        nextVal
+          ? "Rest day logged. Go recharge, I won't nag you about focus blocks today."
+          : 'Back on the grind. Let us hit your targets.'
+      );
+      setExpression(nextVal ? 'sleepy' : 'pleased');
+    } catch {
+      setIsRestDay(!nextVal);
     }
   };
 
-  const handleMute2h = async () => {
-    const until = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-    setMutedUntil(until);
-    try {
-      await fetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          proactivity: {
-            muted_until: until,
-          },
-        }),
-      });
-      const msg = "Proactive voice alerts muted for the next 2 hours.";
-      setDialogue(msg);
-      triggerSpeak(msg);
-    } catch (e) {
-      console.warn('Failed to mute:', e);
+  const toggleMute = () => {
+    if (isSpeaking) {
+      stopSpeaking();
+      setIsSpeaking(false);
     }
+    setIsMuted((prev) => !prev);
   };
 
-  // Manual panel inspection triggers
-  const toggleStatsPanel = () => {
-    if (leftPanel) {
-      setLeftPanel(null);
-    } else {
-      setLeftPanel({
-        title: 'TELEMETRY & STATS',
-        content: (
-          <div className="space-y-4">
-            <div className="glass-panel-subtle p-4 rounded-xl border border-rose-500/20 space-y-2.5">
-              <div className="flex justify-between items-baseline">
-                <span className="text-xs text-rose-300">Focus Hours Logged</span>
-                <span className="text-base font-mono font-bold text-white">
-                  {stats ? `${Math.floor(stats.work_min / 60)}h ${stats.work_min % 60}m` : '3h 45m'}
-                </span>
-              </div>
-              <div className="w-full bg-rose-950/60 rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="bg-gradient-to-r from-rose-600 to-rose-400 h-1.5 rounded-full"
-                  style={{ width: `${Math.min(100, Math.round(((stats?.work_min || 225) / 300) * 100))}%` }}
-                />
-              </div>
-              <div className="text-[11px] font-mono text-rose-400/80 flex justify-between">
-                <span>Target: 5h 00m</span>
-                <span>Leisure: {stats?.leisure_min || 42}m</span>
-              </div>
-            </div>
-
-            <div className="glass-panel-subtle p-4 rounded-xl border border-rose-500/20 space-y-1">
-              <span className="text-xs text-rose-300">GitHub Commits</span>
-              <p className="text-base font-mono font-bold text-white">{stats?.commits || 4} pushed today</p>
-              <p className="text-[11px] font-mono text-rose-400/70">12 days continuous streak</p>
-            </div>
-          </div>
-        ),
-      });
-    }
-  };
-
-  const toggleMemoryPanel = () => {
-    if (rightPanel) {
-      setRightPanel(null);
-    } else {
-      setRightPanel({
-        title: 'TASKS & AGENDA',
-        content: (
-          <div className="space-y-3">
-            <span className="text-xs font-mono uppercase tracking-wider text-rose-400 block">Active Tasks</span>
-            <div className="space-y-2">
-              {tasks.slice(0, 5).map((t) => (
-                <div key={t.id} className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/20 flex items-center justify-between text-xs">
-                  <span className={`truncate max-w-[200px] ${t.status === 'completed' ? 'line-through text-rose-400/50' : 'text-white'}`}>
-                    {t.title}
-                  </span>
-                  <span className="text-[10px] font-mono text-rose-300/70">{t.est_min}m</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ),
-      });
-    }
-  };
-
-  const hasPanelsOpen = leftPanel !== null || rightPanel !== null;
+  const suggestions = [
+    { label: '/stats', prompt: 'Give me a summary of my stats and output today' },
+    { label: '/focus', prompt: 'Start a 45-minute focus session' },
+    { label: '/tasks', prompt: 'What tasks are on my list today?' },
+    { label: '/timeline', prompt: 'Show me my activity timeline for today' },
+  ];
 
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-[#070105] text-[#fff1f2] flex flex-col justify-between selection:bg-rose-500/30 selection:text-white">
-      {/* Ambient Dark Burgundy Radial Glow */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,#1c0412_0%,#090106_65%,#050004_100%)] pointer-events-none" />
+    <div className="relative min-h-screen w-full bg-[#080205] text-rose-50 flex flex-col justify-between overflow-x-hidden selection:bg-rose-600/30">
+      {/* Subtle Ambient Cosmic Background Lighting */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] rounded-full bg-radial from-rose-950/25 via-burgundy-950/15 to-transparent blur-3xl opacity-70" />
+        <div className="absolute bottom-10 right-10 w-[450px] h-[450px] rounded-full bg-radial from-burgundy-900/15 to-transparent blur-3xl opacity-50" />
+      </div>
 
-      {/* TOP STATUS BAR */}
-      <header className="relative z-20 flex items-center justify-between px-8 py-3.5 border-b border-rose-500/15 backdrop-blur-md bg-[#0a0207]/40">
-        <div className="flex items-center gap-3">
-          <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shadow-[0_0_10px_#f43f5e]" />
-          <span className="font-mono text-sm tracking-[0.25em] font-bold text-rose-100">SOFIA</span>
-          <span className="text-[11px] font-mono tracking-widest text-rose-400/60 uppercase">JARVIS ENGINE</span>
+      {/* TOP MINIMAL STATUS BAR */}
+      <header className="relative z-30 w-full max-w-7xl mx-auto px-6 pt-5 pb-2 flex items-center justify-between">
+        {/* Left: Clock & Mood Pill */}
+        <div className="flex items-center space-x-3">
+          <span className="text-sm font-mono tracking-wider font-semibold text-rose-200">
+            {currentTime || '12:00'}
+          </span>
+          <div className="flex items-center space-x-1.5 px-3 py-1 rounded-full bg-burgundy-950/70 border border-burgundy-800/40 shadow-sm text-xs font-mono">
+            <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse" />
+            <span className="text-rose-200 font-medium">{moodLabel}</span>
+            <span className="text-rose-400/40">|</span>
+            <span className="text-rose-300 font-bold">{score} pts</span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-5">
+        {/* Right: Quick Action Controls + Secondary Menu */}
+        <div className="flex items-center space-x-2">
+          {/* Rest Day Toggle */}
           <button
-            onClick={toggleStatsPanel}
-            aria-label="Toggle telemetry panel"
-            className="flex items-center gap-1.5 text-xs font-mono text-rose-300/80 hover:text-white px-2.5 py-1 rounded-lg hover:bg-rose-950/40 transition-colors"
-          >
-            <BarChart3 className="w-3.5 h-3.5 text-rose-400" />
-            <span>Telemetry</span>
-          </button>
-
-          <button
-            onClick={toggleMemoryPanel}
-            aria-label="Toggle tasks panel"
-            className="flex items-center gap-1.5 text-xs font-mono text-rose-300/80 hover:text-white px-2.5 py-1 rounded-lg hover:bg-rose-950/40 transition-colors"
-          >
-            <Database className="w-3.5 h-3.5 text-rose-400" />
-            <span>Tasks</span>
-          </button>
-
-          <div className="flex items-center gap-1.5 text-xs font-mono text-rose-200/80">
-            <Flame className="w-3.5 h-3.5 text-rose-400" />
-            <span>Streak: <strong className="text-white">14d</strong></span>
-          </div>
-
-          <button
-            onClick={handleToggleRestDay}
-            className={`px-3 py-1 rounded-full text-xs font-mono transition-all flex items-center gap-1.5 border ${
-              restDay
-                ? 'bg-amber-950/60 border-amber-500/50 text-amber-200'
-                : 'bg-rose-950/30 border-rose-500/25 text-rose-300 hover:border-rose-400/50'
+            onClick={toggleRestDay}
+            title={isRestDay ? 'Rest day active (click to resume normal schedule)' : 'Set Rest Day'}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-mono border transition-all ${
+              isRestDay
+                ? 'bg-rose-900/70 text-rose-100 border-rose-400/50 shadow-[0_0_15px_rgba(225,29,72,0.4)]'
+                : 'bg-burgundy-950/60 hover:bg-burgundy-900/50 text-rose-300 border-burgundy-800/40'
             }`}
           >
-            <Moon className="w-3 h-3" />
-            <span>Rest: {restDay ? 'ON' : 'OFF'}</span>
+            <Moon className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{isRestDay ? 'Resting' : 'Rest'}</span>
           </button>
+
+          {/* Mute Voice Toggle */}
+          <button
+            onClick={toggleMute}
+            title={isMuted ? 'Unmute voice output' : 'Mute voice output'}
+            className={`p-2 rounded-xl text-xs font-mono border transition-all ${
+              isMuted
+                ? 'bg-amber-950/60 text-amber-300 border-amber-700/50'
+                : 'bg-burgundy-950/60 hover:bg-burgundy-900/50 text-rose-300 border-burgundy-800/40'
+            }`}
+          >
+            {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+          </button>
+
+          {/* Secondary Navigation Dropdown (⋯) */}
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              title="More views & settings"
+              aria-label="Navigation menu"
+              className="p-2 rounded-xl bg-burgundy-950/60 hover:bg-burgundy-900/50 text-rose-300 border border-burgundy-800/40 transition-all"
+            >
+              <MoreHorizontal className="w-4 h-4" />
+            </button>
+
+            {menuOpen && (
+              <div className="absolute right-0 mt-2 w-48 rounded-2xl glass-panel border border-burgundy-700/50 shadow-2xl p-2 z-50 flex flex-col space-y-1 animate-fadeIn">
+                <Link
+                  href="/chat"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-medium text-rose-200 hover:text-white hover:bg-rose-900/50 transition-colors"
+                >
+                  <MessageSquare className="w-4 h-4 text-rose-400" />
+                  <span>Chat Stream</span>
+                </Link>
+                <Link
+                  href="/timeline"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-medium text-rose-200 hover:text-white hover:bg-rose-900/50 transition-colors"
+                >
+                  <Clock className="w-4 h-4 text-rose-400" />
+                  <span>Timeline</span>
+                </Link>
+                <Link
+                  href="/tasks"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-medium text-rose-200 hover:text-white hover:bg-rose-900/50 transition-colors"
+                >
+                  <CheckSquare className="w-4 h-4 text-rose-400" />
+                  <span>Tasks</span>
+                </Link>
+                <Link
+                  href="/history"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-medium text-rose-200 hover:text-white hover:bg-rose-900/50 transition-colors"
+                >
+                  <TrendingUp className="w-4 h-4 text-rose-400" />
+                  <span>Day History</span>
+                </Link>
+                <Link
+                  href="/memory"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-medium text-rose-200 hover:text-white hover:bg-rose-900/50 transition-colors"
+                >
+                  <BookOpen className="w-4 h-4 text-rose-400" />
+                  <span>Long-term Memory</span>
+                </Link>
+                <div className="h-[1px] bg-rose-900/40 my-1" />
+                <Link
+                  href="/settings"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-medium text-rose-200 hover:text-white hover:bg-rose-900/50 transition-colors"
+                >
+                  <Settings className="w-4 h-4 text-rose-400" />
+                  <span>Preferences</span>
+                </Link>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
-      {/* DYNAMIC VIEWPORT STAGE */}
-      <div className="relative z-10 flex-1 flex items-center justify-between px-8 py-2 overflow-hidden gap-6">
-        
-        {/* Dynamic Sliding LEFT Panel */}
-        {leftPanel && (
-          <SofiaPanel
-            side="left"
-            title={leftPanel.title}
-            onClose={() => setLeftPanel(null)}
-            content={leftPanel.content}
-          />
+      {/* CENTER DYNAMIC STAGE */}
+      <main className="relative z-10 w-full flex-1 flex flex-col items-center justify-center">
+        <Stage
+          expression={expression}
+          isSpeaking={isSpeaking}
+          score={score}
+          captionText={captionText}
+          panes={panes}
+          onDismissPane={handleDismissPane}
+          onPinPane={handlePinPane}
+        />
+      </main>
+
+      {/* BOTTOM UNIFIED DOCK (Mic + Input Bar + Shortcuts) */}
+      <footer className="relative z-30 w-full max-w-3xl mx-auto px-6 pb-6 pt-2 flex flex-col space-y-2.5">
+        {/* Quick Suggestion Pills */}
+        {showSuggestions && (
+          <div className="flex items-center space-x-2 overflow-x-auto py-1 px-1 custom-scrollbar animate-fadeIn">
+            {suggestions.map((s, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleSendMessage(s.prompt)}
+                className="whitespace-nowrap px-3 py-1.5 rounded-full bg-burgundy-950/80 hover:bg-burgundy-900/80 border border-burgundy-800/40 text-xs font-mono text-rose-200 hover:text-white transition-all shadow-sm"
+              >
+                <span className="text-rose-400 font-semibold mr-1">{s.label}</span>
+              </button>
+            ))}
+          </div>
         )}
 
-        {/* CENTER STAGE: SOFIA PRESENCE */}
-        <div
-          className={`flex-1 flex flex-col items-center justify-center my-auto transition-all duration-500 ease-out text-center ${
-            hasPanelsOpen ? 'scale-90 max-w-xl' : 'scale-100 max-w-2xl'
-          }`}
-        >
-          {/* Mood Word Pill */}
-          <div className="mb-2">
-            <span className="text-xs font-mono tracking-[0.35em] uppercase text-rose-400/90 font-bold bg-rose-950/50 px-4 py-1 rounded-full border border-rose-500/25 backdrop-blur-md">
-              {mood}
+        {/* Live Speech Interim Preview */}
+        {(transcript || interimTranscript) && (
+          <div className="px-4 py-2 rounded-xl bg-rose-950/70 border border-rose-500/30 text-xs font-mono text-rose-200 flex items-center space-x-2 animate-fadeIn">
+            <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping shrink-0" />
+            <span className="truncate">
+              {transcript} <span className="text-rose-400/70 italic">{interimTranscript}</span>
             </span>
           </div>
+        )}
 
-          {/* Large Sofia Avatar in Center */}
-          <div className="my-1">
-            <SofiaAvatar
-              expression={expression}
-              isSpeaking={isSpeaking}
-              score={score}
-              size="xl"
-              onClick={() => triggerSpeak(dialogue)}
+        {/* Unified Input Dock Bar */}
+        <div className="relative flex items-center space-x-2 p-1.5 rounded-2xl glass-panel border border-burgundy-700/50 shadow-[0_8px_32px_rgba(20,3,10,0.8)]">
+          {/* Continuous Mic Button */}
+          <button
+            onClick={toggleListening}
+            aria-label={isListening ? 'Stop listening' : 'Start voice input'}
+            title={isListening ? 'Microphone active (click to stop)' : 'Click to talk (or hold Space)'}
+            className={`p-3 rounded-xl transition-all flex items-center justify-center shrink-0 min-w-[44px] min-h-[44px] ${
+              isListening
+                ? 'bg-rose-600 text-white shadow-[0_0_20px_rgba(225,29,72,0.8)] animate-pulse'
+                : 'bg-burgundy-950/70 hover:bg-burgundy-900/60 text-rose-300 hover:text-white border border-burgundy-800/40'
+            }`}
+          >
+            {isListening ? <Mic className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+          </button>
+
+          {/* Unified Text Input */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSendMessage();
+            }}
+            className="flex-1 flex items-center space-x-2"
+          >
+            <input
+              ref={inputRef}
+              type="text"
+              value={inputText}
+              onChange={(e) => {
+                setInputText(e.target.value);
+                setShowSuggestions(e.target.value.startsWith('/'));
+              }}
+              onFocus={() => {
+                if (inputText.startsWith('/')) setShowSuggestions(true);
+              }}
+              placeholder="Ask Sofia or type / for commands (Cmd+K)"
+              className="flex-1 bg-transparent px-3 py-2.5 text-sm text-rose-50 placeholder:text-rose-400/50 focus:outline-none min-h-[44px]"
             />
-          </div>
 
-          {/* Spoken Caption Line */}
-          <div className="w-full max-w-xl mt-2">
-            <div className="glass-panel rounded-2xl px-6 py-3.5 border border-rose-500/25 shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
-              <p className="text-base text-[#fbf5f7] font-medium leading-relaxed tracking-wide">
-                &ldquo;{dialogue}&rdquo;
-              </p>
-            </div>
-          </div>
+            {/* Send Button */}
+            <button
+              type="submit"
+              disabled={isSending || !inputText.trim()}
+              aria-label="Send message"
+              className="p-3 rounded-xl bg-gradient-to-r from-rose-700 to-crimson-600 hover:from-rose-600 hover:to-crimson-500 disabled:opacity-30 text-white transition-all shadow-[0_0_15px_rgba(225,29,72,0.3)] shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
+            >
+              {isSending ? (
+                <Bot className="w-4 h-4 animate-spin text-rose-200" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+            </button>
+          </form>
         </div>
 
-        {/* Dynamic Sliding RIGHT Panel */}
-        {rightPanel && (
-          <SofiaPanel
-            side="right"
-            title={rightPanel.title}
-            onClose={() => setRightPanel(null)}
-            content={rightPanel.content}
-          />
-        )}
-      </div>
-
-      {/* BOTTOM UNIFIED DOCK: TEXT INPUT */}
-      <footer className="relative z-20 px-8 pb-5 pt-1 max-w-3xl w-full mx-auto flex flex-col gap-2.5">
-
-        {/* Unified Text Input Pill */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleSendPrompt();
-          }}
-          className="w-full flex items-center gap-2 glass-panel rounded-full px-4 py-1.5 border border-rose-500/30 focus-within:border-rose-400 shadow-md backdrop-blur-md"
-        >
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder="Ask Sofia or dispatch command..."
-            className="flex-1 bg-transparent text-sm text-white placeholder:text-rose-300/40 focus:outline-none font-sans"
-          />
-          <button
-            type="submit"
-            disabled={isThinking || !inputText.trim()}
-            className="p-1.5 rounded-full text-rose-400 hover:text-white disabled:opacity-40 transition-colors"
-            aria-label="Send command"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </form>
+        {/* Keyboard shortcut hint */}
+        <div className="flex justify-between items-center text-[10px] font-mono text-rose-400/60 px-2">
+          <span>Esc: stop audio / dismiss panes</span>
+          <span>Cmd+K: focus input</span>
+        </div>
       </footer>
-    </main>
+    </div>
   );
 }
