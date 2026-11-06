@@ -127,7 +127,7 @@ describe('Brain Subsystem', () => {
     expect(res3.text).toBe('Plain line without mood tag.');
   });
 
-  it('has all 9 typed tools defined in SOFIA_TOOLS', () => {
+  it('has all typed tools defined in SOFIA_TOOLS', () => {
     const toolNames = SOFIA_TOOLS.map((t) => t.function.name);
     expect(toolNames).toContain('get_stats');
     expect(toolNames).toContain('get_timeline');
@@ -138,12 +138,42 @@ describe('Brain Subsystem', () => {
     expect(toolNames).toContain('start_focus_session');
     expect(toolNames).toContain('set_reminder');
     expect(toolNames).toContain('request_consequence');
+    expect(toolNames).toContain('browse_url');
+    expect(toolNames).toContain('show_image');
   });
 
-  it('executes get_stats tool cleanly', () => {
+  it('executes get_stats tool cleanly and yields a pane', () => {
     const res = executeSofiaTool(db, 'get_stats', { range: 'day' }, defaultSettings);
     expect(res.error).toBeUndefined();
     expect(res.result).toBeDefined();
     expect(res.result.stats.commits).toBe(8);
+    expect(res.pane).toBeDefined();
+    expect(res.pane?.kind).toBe('stat');
+  });
+
+  it('parses strict SofiaTurn JSON and handles code fences or invalid input gracefully', async () => {
+    const { parseTurn } = await import('../src/lib/brain');
+
+    const validJson = JSON.stringify({
+      say: 'Eight commits and 19 percent leisure. Keep pace.',
+      mood: 'pleased',
+      panes: [{ id: 'p1', kind: 'stat', metrics: [{ label: 'Commits', value: 8 }] }],
+    });
+    const parsed1 = parseTurn(validJson);
+    expect(parsed1.say).toBe('Eight commits and 19 percent leisure. Keep pace.');
+    expect(parsed1.mood).toBe('pleased');
+    expect(parsed1.panes?.length).toBe(1);
+
+    // Markdown code fence wrapped JSON
+    const fenced = '```json\n' + validJson + '\n```';
+    const parsed2 = parseTurn(fenced);
+    expect(parsed2.say).toBe('Eight commits and 19 percent leisure. Keep pace.');
+    expect(parsed2.mood).toBe('pleased');
+
+    // Plain text fallback
+    const plain = 'Simple answer [MOOD:stern]';
+    const parsed3 = parseTurn(plain);
+    expect(parsed3.say).toBe('Simple answer');
+    expect(parsed3.mood).toBe('stern');
   });
 });

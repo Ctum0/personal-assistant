@@ -3,6 +3,7 @@ import { buildPersonaPrompt } from './persona';
 import { getDayScore, getDayStats, getSettings } from './db';
 import { SofiaExpression, SofiaSettings } from './types';
 import { evaluateConsequenceRequest } from './policy';
+import { Pane, SofiaTurn, SofiaMood } from './stage';
 
 export interface BrainTurnContext {
   now: string;
@@ -95,7 +96,7 @@ export function buildLiveContextBlock(db: DatabaseSync, dateStr: string): BrainT
       score: scoreData.score,
       coverage: stats.coverage,
     },
-    streak_days: 2, // will be computed dynamically
+    streak_days: 2,
     current_app: currentApp,
     open_tasks: openTasks.map((t) => t.title),
     next_event: nextEvent,
@@ -111,6 +112,61 @@ export function extractMood(response: string): { text: string; mood: SofiaExpres
     return { text: cleanText, mood };
   }
   return { text: response.trim(), mood: 'neutral' };
+}
+
+export function parseTurn(raw: string): SofiaTurn {
+  const VALID_MOODS: SofiaMood[] = [
+    'neutral',
+    'pleased',
+    'amused',
+    'focused',
+    'stern',
+    'disappointed',
+    'concerned',
+    'sleepy',
+  ];
+
+  if (!raw || typeof raw !== 'string') {
+    return { say: "I'm listening.", mood: 'neutral' };
+  }
+
+  // 1. Strip markdown ```json ... ``` code fences
+  let cleaned = raw.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  }
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    let say = typeof parsed.say === 'string' && parsed.say.trim() ? parsed.say.trim() : '';
+    if (!say && typeof parsed.content === 'string') say = parsed.content.trim();
+    if (!say && typeof parsed.reply === 'string') say = parsed.reply.trim();
+    if (!say) say = raw.trim();
+
+    let mood: SofiaMood = 'neutral';
+    if (typeof parsed.mood === 'string' && VALID_MOODS.includes(parsed.mood.toLowerCase() as SofiaMood)) {
+      mood = parsed.mood.toLowerCase() as SofiaMood;
+    } else {
+      const extracted = extractMood(say);
+      say = extracted.text;
+      if (VALID_MOODS.includes(extracted.mood as SofiaMood)) {
+        mood = extracted.mood as SofiaMood;
+      }
+    }
+
+    let panes: Pane[] | undefined;
+    if (Array.isArray(parsed.panes)) {
+      panes = parsed.panes.filter((p: any) => p && typeof p === 'object' && p.kind).slice(0, 4);
+    }
+
+    return { say, mood, panes };
+  } catch {
+    const extracted = extractMood(raw);
+    const validMood = VALID_MOODS.includes(extracted.mood as SofiaMood)
+      ? (extracted.mood as SofiaMood)
+      : 'neutral';
+    return { say: extracted.text, mood: validMood };
+  }
 }
 
 // Tool definitions for OpenAI-compatible function calling
@@ -244,6 +300,35 @@ export const SOFIA_TOOLS = [
       },
     },
   },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'browse_url',
+      description: 'Fetch and extract reader summary and metadata from a web page',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Web page URL to browse' },
+        },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'show_image',
+      description: 'Project an image or graphic onto the companion Stage',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Image URL or relative path' },
+          caption: { type: 'string', description: 'Optional descriptive caption' },
+        },
+        required: ['url'],
+      },
+    },
+  },
 ];
 
 export function executeSofiaTool(
@@ -251,7 +336,7 @@ export function executeSofiaTool(
   name: string,
   args: any,
   settings: SofiaSettings
-): { result: any; error?: string } {
+): { result: any; pane?: Pane; error?: string } {
   try {
     const today = new Date().toISOString().slice(0, 10);
 
@@ -259,15 +344,48 @@ export function executeSofiaTool(
       case 'get_stats': {
         const stats = getDayStats(db, today);
         const score = getDayScore(db, today);
-        return { result: { stats, score } };
+        const leisurePct = stats.active_min > 0 ? Math.round((stats.leisure_min / stats.active_min) * 100) : 0;
+        const pane: Pane = {
+          id: `pane-stats-${Date.now()}`,
+          title: "Today's Telemetry",
+          kind: 'stat',
+          metrics: [
+            { label: 'Score', value: `${score.score.toFixed(0)} pts` },
+            { label: 'Commits', value: stats.commits },
+            { label: 'Focus Min', value: `${stats.work_min}m` },
+            { label: 'Leisure', value: `${leisurePct}%` },
+          ],
+        };
+        return { result: { stats, score }, pane };
       }
       case 'get_timeline': {
-        const rows = db.prepare('SELECT ts, category, app, title, duration_s FROM events WHERE ts LIKE ? ORDER BY ts ASC').all(`${args.date || today}%`);
-        return { result: rows };
+        const rows = db
+          .prepare('SELECT ts, category, app, title, duration_s FROM events WHERE ts LIKE ? ORDER BY ts ASC')
+          .all(`${args.date || today}%`) as Array<{
+          ts: string;
+          category: string;
+          app: string;
+          title?: string;
+          duration_s: number;
+        }>;
+        const pane: Pane = {
+          id: `pane-timeline-${Date.now()}`,
+          title: 'Activity Timeline',
+          kind: 'timeline',
+          events: rows.slice(-6).map((r) => ({
+            time: r.ts.slice(11, 16),
+            title: r.title || r.app,
+            category: r.category,
+            duration: `${Math.round(r.duration_s / 60)}m`,
+          })),
+        };
+        return { result: rows, pane };
       }
       case 'search_memory': {
         const query = `%${args.query || ''}%`;
-        const notes = db.prepare('SELECT id, text, tags FROM memory_notes WHERE text LIKE ? ORDER BY pinned DESC LIMIT 5').all(query);
+        const notes = db
+          .prepare('SELECT id, text, tags FROM memory_notes WHERE text LIKE ? ORDER BY pinned DESC LIMIT 5')
+          .all(query);
         return { result: notes };
       }
       case 'list_tasks': {
@@ -276,27 +394,52 @@ export function executeSofiaTool(
           sql += ` WHERE status = '${args.status}'`;
         }
         sql += ' ORDER BY created_at DESC LIMIT 10';
-        return { result: db.prepare(sql).all() };
+        const tasks = db.prepare(sql).all() as Array<{
+          id: string;
+          title: string;
+          status: string;
+          est_min: number;
+        }>;
+        const pane: Pane = {
+          id: `pane-tasks-${Date.now()}`,
+          title: 'Active Tasks',
+          kind: 'todo',
+          items: tasks.map((t) => ({
+            id: t.id,
+            title: t.title,
+            done: t.status === 'completed',
+          })),
+        };
+        return { result: tasks, pane };
       }
       case 'create_task': {
         const id = `task-${Date.now()}`;
         const estMin = args.est_min || 30;
-        db.prepare('INSERT INTO tasks (id, title, status, est_min, created_at) VALUES (?, ?, ?, ?, ?)').run(id, args.title, 'pending', estMin, new Date().toISOString());
+        db.prepare(
+          'INSERT INTO tasks (id, title, status, est_min, created_at) VALUES (?, ?, ?, ?, ?)'
+        ).run(id, args.title, 'pending', estMin, new Date().toISOString());
         return { result: { created: true, id, title: args.title } };
       }
       case 'complete_task': {
-        db.prepare("UPDATE tasks SET status = 'completed', done_at = ? WHERE id = ?").run(new Date().toISOString(), args.taskId);
+        db.prepare("UPDATE tasks SET status = 'completed', done_at = ? WHERE id = ?").run(
+          new Date().toISOString(),
+          args.taskId
+        );
         return { result: { completed: true, id: args.taskId } };
       }
       case 'start_focus_session': {
         const id = `focus-${Date.now()}`;
         const mins = Number(args.minutes) || 25;
-        db.prepare('INSERT INTO focus_sessions (id, start, goal_min, result, distraction_count) VALUES (?, ?, ?, ?, 0)').run(id, new Date().toISOString(), mins, 'active');
+        db.prepare(
+          'INSERT INTO focus_sessions (id, start, goal_min, result, distraction_count) VALUES (?, ?, ?, ?, 0)'
+        ).run(id, new Date().toISOString(), mins, 'active');
         return { result: { active: true, id, goal_min: mins } };
       }
       case 'set_reminder': {
         const id = `sched-${Date.now()}`;
-        db.prepare('INSERT INTO schedules (id, name, cron, action, enabled, next_run) VALUES (?, ?, ?, ?, 1, ?)').run(id, args.text, args.at, 'reminder', args.at);
+        db.prepare(
+          'INSERT INTO schedules (id, name, cron, action, enabled, next_run) VALUES (?, ?, ?, ?, 1, ?)'
+        ).run(id, args.text, args.at, 'reminder', args.at);
         return { result: { scheduled: true, id, at: args.at, text: args.text } };
       }
       case 'request_consequence': {
@@ -315,6 +458,26 @@ export function executeSofiaTool(
         );
         return { result: policyResult };
       }
+      case 'browse_url': {
+        const pane: Pane = {
+          id: `pane-web-${Date.now()}`,
+          title: args.url,
+          kind: 'web',
+          url: args.url,
+          snippet: 'Page content requested.',
+        };
+        return { result: { browsed: true, url: args.url }, pane };
+      }
+      case 'show_image': {
+        const pane: Pane = {
+          id: `pane-img-${Date.now()}`,
+          title: args.caption || 'Image',
+          kind: 'image',
+          url: args.url,
+          caption: args.caption,
+        };
+        return { result: { displayed: true, url: args.url }, pane };
+      }
       default:
         return { result: null, error: `Unknown tool: ${name}` };
     }
@@ -326,8 +489,15 @@ export function executeSofiaTool(
 export async function processSofiaBrainTurn(
   db: DatabaseSync,
   userMessage: string,
-  history: Array<{ role: 'user' | 'assistant'; content: string }> = []
-): Promise<{ text: string; mood: SofiaExpression; toolCalls?: any[] }> {
+  history: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }> = []
+): Promise<{
+  text: string;
+  say: string;
+  mood: SofiaExpression;
+  panes?: Pane[];
+  toolCalls?: any[];
+  turn: SofiaTurn;
+}> {
   const today = new Date().toISOString().slice(0, 10);
   const settings = getSettings(db);
 
@@ -348,13 +518,11 @@ ${JSON.stringify(contextBlock, null, 2)}
 PINNED MEMORY:
 ${pinnedNotes.map((n, i) => `${i + 1}. ${n.text}`).join('\n')}`;
 
-  // Assemble full message sequence (system, context, memory history, user turn)
-  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+  const messages: any[] = [
     { role: 'system', content: systemPrompt },
     { role: 'system', content: contextMessage },
   ];
 
-  // Append up to last 8 turns of conversation
   const recentHistory = history.slice(-8);
   for (const h of recentHistory) {
     messages.push({ role: h.role, content: h.content });
@@ -362,51 +530,124 @@ ${pinnedNotes.map((n, i) => `${i + 1}. ${n.text}`).join('\n')}`;
 
   messages.push({ role: 'user', content: userMessage });
 
-  // LiteLLM configuration from env / settings
   const baseUrl = process.env.LITELLM_BASE_URL || settings.hermes?.base_url || 'https://ai-proxy.zenova.services/v1';
   const apiKey = process.env.LITELLM_API_KEY || '';
   const model = process.env.LITELLM_MODEL || settings.hermes?.model || 'deepseek-v4.1-flash';
 
-  try {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: 400,
-        temperature: 0.7,
-      }),
-      signal: AbortSignal.timeout(90000),
-    });
+  const collectedPanes: Pane[] = [];
+  const executedToolCalls: any[] = [];
 
-    if (res.ok) {
+  // Tool-call loop (up to 2 iterations max)
+  let loopCount = 0;
+  while (loopCount < 2) {
+    loopCount++;
+
+    try {
+      const res = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          tools: SOFIA_TOOLS,
+          tool_choice: 'auto',
+          max_tokens: 600,
+          temperature: 0.6,
+        }),
+        signal: AbortSignal.timeout(90000),
+      });
+
+      if (!res.ok) {
+        break;
+      }
+
       const data = await res.json();
-      const rawText = data.choices?.[0]?.message?.content || '';
-      return extractMood(rawText);
+      const choice = data.choices?.[0];
+      const message = choice?.message;
+
+      if (!message) break;
+
+      // Check if model emitted function tool calls
+      if (message.tool_calls && message.tool_calls.length > 0) {
+        messages.push(message);
+
+        for (const tc of message.tool_calls) {
+          executedToolCalls.push(tc);
+          let parsedArgs = {};
+          try {
+            parsedArgs = JSON.parse(tc.function.arguments || '{}');
+          } catch {}
+
+          const toolExec = executeSofiaTool(db, tc.function.name, parsedArgs, settings);
+          if (toolExec.pane) {
+            collectedPanes.push(toolExec.pane);
+          }
+
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: JSON.stringify(toolExec.result ?? { error: toolExec.error }),
+          });
+        }
+        continue; // Loop again to get final assistant response
+      }
+
+      // Final assistant response content
+      const rawText = message.content || '';
+      const turn = parseTurn(rawText);
+
+      // Merge model panes and tool generated panes
+      const mergedPanes = [...collectedPanes, ...(turn.panes || [])];
+      turn.panes = mergedPanes.length > 0 ? mergedPanes : undefined;
+
+      return {
+        text: turn.say,
+        say: turn.say,
+        mood: turn.mood as SofiaExpression,
+        panes: turn.panes,
+        toolCalls: executedToolCalls.length > 0 ? executedToolCalls : undefined,
+        turn,
+      };
+    } catch (err) {
+      console.warn('LiteLLM request error:', err);
+      break;
     }
-  } catch (err) {
-    // LiteLLM unreachable or timeout -> fallback to deterministic factual response
   }
 
-  // Graceful deterministic fact-based fallback (ensures she always cites numbers from day_stats!)
+  // Graceful deterministic fact-based fallback citing day_stats
   const stats = getDayStats(db, today);
   const scoreData = getDayScore(db, today);
   const leisurePct = stats.active_min > 0 ? Math.round((stats.leisure_min / stats.active_min) * 100) : 0;
 
   if (stats.coverage < 0.8) {
-    return {
-      text: "I only saw part of your day. 4 hours unaccounted. I'm not scoring what I can't see.",
+    const turn: SofiaTurn = {
+      say: "I only saw part of your day. 4 hours unaccounted. I'm not scoring what I can't see.",
       mood: 'concerned',
+    };
+    return {
+      text: turn.say,
+      say: turn.say,
+      mood: 'concerned',
+      turn,
     };
   }
 
-  return {
-    text: `Score ${scoreData.score.toFixed(0)}. ${stats.commits} commits, ${leisurePct} percent leisure, ${stats.work_min} focus minutes logged. Keep to the pace.`,
+  const turn: SofiaTurn = {
+    say: `Score ${scoreData.score.toFixed(0)}. ${stats.commits} commits, ${leisurePct} percent leisure, ${stats.work_min} focus minutes logged. Keep to the pace.`,
     mood: scoreData.score >= 8 ? 'pleased' : scoreData.score < 5 ? 'stern' : 'focused',
+    panes: collectedPanes.length > 0 ? collectedPanes : undefined,
+  };
+
+  return {
+    text: turn.say,
+    say: turn.say,
+    mood: turn.mood as SofiaExpression,
+    panes: turn.panes,
+    toolCalls: executedToolCalls.length > 0 ? executedToolCalls : undefined,
+    turn,
   };
 }
 
