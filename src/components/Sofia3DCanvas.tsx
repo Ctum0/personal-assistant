@@ -49,11 +49,11 @@ export default function Sofia3DCanvas({
     sceneRef.current = scene;
 
     // Cinematic Bust-Up / Waist-Up Camera
-    // Focal length ~45mm (FOV 36°). Position: (0, 1.16, 1.88), lookAt: (0, 1.08, 0).
-    // Provides generous vertical headroom (>30cm) so Sofia's hair, fox ears, and cowlick never clip at the top of the circle!
-    const camera = new THREE.PerspectiveCamera(36, width / height, 0.1, 50);
-    camera.position.set(0, 1.16, 1.88);
-    camera.lookAt(0, 1.08, 0);
+    // Focal length ~45mm (FOV 38°). Position: (0, 1.18, 1.85), lookAt: (0, 1.06, 0).
+    // Provides generous headroom above Sofia's fox ears and crown while naturally extending hips into the glass rail
+    const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 50);
+    camera.position.set(0, 1.18, 1.85);
+    camera.lookAt(0, 1.06, 0);
     cameraRef.current = camera;
 
     // 100% Transparent WebGL Renderer with ACES Filmic Tone Mapping
@@ -169,8 +169,12 @@ export default function Sofia3DCanvas({
     <div
       ref={containerRef}
       className="relative w-full h-full flex items-center justify-center overflow-visible select-none pointer-events-none"
+      style={{
+        maskImage: 'linear-gradient(to bottom, rgba(0,0,0,1) 82%, rgba(0,0,0,0) 100%)',
+        WebkitMaskImage: 'linear-gradient(to bottom, rgba(0,0,0,1) 82%, rgba(0,0,0,0) 100%)',
+      }}
     >
-      {/* 3D WebGL Canvas — 100% transparent, seamlessly rendered in center dais */}
+      {/* 3D WebGL Canvas — 100% transparent, open space stage */}
       <canvas
         ref={canvasRef}
         className="w-full h-full block relative z-10"

@@ -258,50 +258,44 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
         </button>
       </div>
 
-      {/* 2. Center Stage: Circular Holographic Dais / Ethereal Glass Portal */}
-      <section aria-label="Sofia Companion Dais" className="relative z-10 flex-1 flex flex-col items-center justify-center w-full px-4 min-h-0 py-1">
-        <div className="relative flex items-center justify-center">
-          {/* Ambient Glowing Backlight Halo (Softly pulses with vocal energy) */}
+      {/* 2. Center Stage: Open Horizon Architectural Grounding & Floating Glass Console Rail */}
+      <section aria-label="Sofia Companion Stage" className="relative z-10 flex-1 flex flex-col items-center justify-center w-full px-4 min-h-0">
+        <div className="relative w-full max-w-4xl flex flex-col items-center justify-center">
+          
+          {/* Atmospheric Depth: Background Eclipse Glow BEHIND Sofia (z-0) */}
           <div 
-            className={`absolute -inset-8 rounded-full blur-2xl transition-all duration-700 pointer-events-none ${
+            className={`w-[600px] sm:w-[720px] h-[350px] sm:h-[400px] rounded-full blur-[90px] pointer-events-none absolute top-[42%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-0 transition-all duration-700 ${
               isSpeaking
-                ? 'bg-rose-500/22 scale-105 shadow-[0_0_110px_rgba(244,63,94,0.30)]'
+                ? 'bg-gradient-to-t from-[#6b0d28]/35 via-[#360515]/25 to-transparent scale-105'
                 : isListening
-                ? 'bg-cyan-500/18 scale-102 shadow-[0_0_90px_rgba(6,182,212,0.22)]'
-                : 'bg-rose-950/35 scale-100 shadow-[0_0_70px_rgba(225,29,72,0.12)]'
+                ? 'bg-gradient-to-t from-[#0d4a6b]/25 via-[#052536]/18 to-transparent scale-102'
+                : 'bg-gradient-to-t from-[#4a081a]/30 via-[#26040e]/20 to-transparent scale-100'
             }`}
+            aria-hidden="true"
           />
 
-          {/* Holographic Circular Portal Dais */}
-          <div 
-            className={`w-[360px] h-[360px] sm:w-[440px] sm:h-[440px] md:w-[480px] md:h-[480px] lg:w-[520px] lg:h-[520px] xl:w-[540px] xl:h-[540px] rounded-full relative overflow-hidden flex items-center justify-center transition-all duration-500 backdrop-blur-2xl bg-[#0d0207]/40 shadow-[0_8px_32px_0_rgba(0,0,0,0.6)] ${
-              isSpeaking
-                ? 'border border-rose-400/40 shadow-[0_0_80px_rgba(244,63,94,0.30)]'
-                : 'border border-[#8b1538]/25 shadow-[0_8px_32px_0_rgba(0,0,0,0.6),0_0_50px_rgba(139,21,56,0.15)]'
-            }`}
-          >
-            {/* Luminous Eclipse Aura & Deep Velvet Gradient BEHIND Sofia (z-0) */}
-            <div className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(circle_at_50%_44%,rgba(38,6,22,0.85)_0%,rgba(16,2,10,0.92)_65%,rgba(5,1,4,0.98)_100%)] z-0" />
-            
-            {/* Soft Luminous Rose-Gold Horizon Aura BEHIND the 3D model */}
-            <div className={`pointer-events-none absolute -inset-2 rounded-full transition-all duration-700 blur-xl z-0 ${
-              isSpeaking 
-                ? 'bg-gradient-to-tr from-rose-900/30 via-rose-500/20 to-amber-200/15 opacity-100 scale-105' 
-                : 'bg-gradient-to-tr from-rose-950/20 via-rose-600/10 to-transparent opacity-70 scale-100'
-            }`} />
+          {/* 3D Canvas Stage: Wide central stage without circular mask constraint */}
+          <div className="relative w-full h-[460px] sm:h-[500px] md:h-[540px] flex items-center justify-center z-10 overflow-visible">
+            <Sofia3DCanvas
+              expression={expression}
+              isSpeaking={isSpeaking}
+              dialogue={dialogue}
+              onOpenVoiceModal={onOpenVoiceModal}
+            />
 
-            {/* 3D VRM Canvas (Camera focused at bust-up/waist-up elevation; completely clean & unobstructed at z-10!) */}
-            <div className="w-full h-full relative z-10">
-              <Sofia3DCanvas
-                expression={expression}
-                isSpeaking={isSpeaking}
-                dialogue={dialogue}
-                onOpenVoiceModal={onOpenVoiceModal}
-              />
+            {/* Floating Glass Console Rail / Horizon Command Ledge (The "Desk" Illusion) */}
+            {/* Anchored precisely across the lower cutoff threshold of the model */}
+            <div 
+              className="absolute bottom-0 inset-x-2 sm:inset-x-6 md:inset-x-12 h-16 sm:h-20 md:h-24 rounded-t-[3rem] backdrop-blur-2xl bg-[#090206]/60 border-t border-x border-[#8b1538]/30 shadow-[0_-12px_35px_rgba(139,21,56,0.18)] z-20 flex flex-col items-center justify-start pt-2 pointer-events-none overflow-hidden"
+              aria-hidden="true"
+            >
+              {/* Sleek specular rim highlight across curved top edge */}
+              <div className="absolute top-0 inset-x-10 h-[1.5px] bg-gradient-to-r from-transparent via-[#f5d0a9]/40 to-transparent" />
+              {/* Subtle ambient light bar */}
+              <div className="w-16 h-1 rounded-full bg-rose-500/25 mt-1" />
+              {/* Soft interior ambient velvet glass gradient */}
+              <div className="absolute inset-0 bg-gradient-to-b from-[#8b1538]/15 via-[#090206]/50 to-[#040103]/80 -z-10" />
             </div>
-
-            {/* Subtle Ethereal Glass Glare Highlight */}
-            <div className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-tr from-transparent via-white/[0.025] to-transparent z-20" />
           </div>
         </div>
       </section>

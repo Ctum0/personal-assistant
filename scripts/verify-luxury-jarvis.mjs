@@ -38,8 +38,8 @@ async function verifyLuxuryJarvis() {
       hasSplitCards: !!document.querySelector('.grid-cols-12'),
       hasTopPillBars: !!document.body.innerText.includes('HERMES AI ONLINE • :8642'),
       hasInspectButtons: !!document.querySelector('button[aria-label*="view"]'),
-      hasCircularDais: !!document.querySelector('.rounded-full'),
-      hasCaptionLine: !!document.querySelector('footer p'),
+      hasOpenHorizonStage: !!document.querySelector('section[aria-label="Sofia Companion Stage"]'),
+      hasGlassConsoleRail: !!document.querySelector('[class*="rounded-t-"]'),
       hasCommandInput: !!document.querySelector('#jarvis-command-input'),
     };
   });
