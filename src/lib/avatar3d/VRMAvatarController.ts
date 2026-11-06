@@ -29,15 +29,25 @@ export class VRMAvatarController {
   // Animation & Physics Clock
   private clock = new THREE.Clock();
 
-  // Natural Autonomous Blinking (3.5 to 6.0 seconds interval)
-  private blinkTimer = 4.2;
+  // Natural Autonomous Anime Blinking (with organic double-blinks)
+  private blinkTimer = 3.8;
   private isBlinking = false;
   private blinkProgress = 0;
+  private doubleBlinkPending = false;
+  private doubleBlinkTimer = 0.0;
   
-  // Autonomous Head & Posture State (Semi-random natural weight/head shifts every 10-20s)
-  private autonomousShiftTimer = 12.0;
+  // Autonomous Head & Eye Life State (Organic 1°–3° head-tilts with cubic ease-in-out + eye saccades)
+  private autonomousShiftTimer = 3.5;
+  private headShiftDuration = 2.4;
+  private headShiftProgress = 2.4;
+  private startHeadEuler = new THREE.Euler(0, 0, 0, 'YXZ');
   private currentHeadEuler = new THREE.Euler(0, 0, 0, 'YXZ');
   private targetHeadEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+  private eyeSaccadeTimer = 2.2;
+  private currentEyeYaw = 0.0;
+  private currentEyePitch = 0.0;
+  private targetEyeYaw = 0.0;
+  private targetEyePitch = 0.0;
 
   // Procedural Conversational Hand & Arm Gestures Engine
   private currentGestureIndex = 0;
@@ -87,13 +97,11 @@ export class VRMAvatarController {
   // Speech cadence timer
   private speechTimer = 0;
 
-  // Ambient Glowing Ember Particles (Swirling Helical Vortex)
+  // Soft Floating Depth-of-Field Embers & Sparkles (35-40 translucent motes)
   private particles: THREE.Points | null = null;
   private particlePositions: Float32Array | null = null;
   private particleSeeds: Float32Array | null = null;
-  private particleAngles: Float32Array | null = null;
-  private particleRadii: Float32Array | null = null;
-  private particleCount = 180;
+  private particleCount = 38;
   private particleMaterial: THREE.PointsMaterial | null = null;
 
   constructor() {}
@@ -167,43 +175,34 @@ export class VRMAvatarController {
   }
 
   /**
-   * Initializes soft-glowing ethereal ember particles in an orbital double-helix vortex around Sofia
+   * Initializes soft, floating depth-of-field embers/sparkles (35-40 translucent motes)
    */
   private initAmbientParticles(scene: THREE.Scene): void {
     const geo = new THREE.BufferGeometry();
     const pos = new Float32Array(this.particleCount * 3);
     const seeds = new Float32Array(this.particleCount);
-    const angles = new Float32Array(this.particleCount);
-    const radii = new Float32Array(this.particleCount);
 
     for (let i = 0; i < this.particleCount; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const radius = 0.35 + Math.random() * 0.55;
-      angles[i] = angle;
-      radii[i] = radius;
+      pos[i * 3 + 0] = (Math.random() - 0.5) * 1.8;
+      pos[i * 3 + 1] = 0.15 + Math.random() * 1.70;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 1.4;
       seeds[i] = Math.random() * Math.PI * 2;
-
-      pos[i * 3 + 0] = Math.cos(angle) * radius;
-      pos[i * 3 + 1] = 0.20 + Math.random() * 1.45;
-      pos[i * 3 + 2] = Math.sin(angle) * radius;
     }
 
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     this.particlePositions = pos;
     this.particleSeeds = seeds;
-    this.particleAngles = angles;
-    this.particleRadii = radii;
 
-    // Glowing ember circle texture
+    // Soft Gaussian blurred ember circle texture (translucent rose-gold / champagne warmth)
     const canvas = document.createElement('canvas');
     canvas.width = 64;
     canvas.height = 64;
     const ctx = canvas.getContext('2d');
     if (ctx) {
       const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-      grad.addColorStop(0, 'rgba(255, 220, 235, 1.0)');
-      grad.addColorStop(0.3, 'rgba(244, 63, 94, 0.85)');
-      grad.addColorStop(0.7, 'rgba(180, 20, 80, 0.35)');
+      grad.addColorStop(0, 'rgba(255, 235, 245, 0.95)');
+      grad.addColorStop(0.25, 'rgba(244, 114, 140, 0.70)');
+      grad.addColorStop(0.65, 'rgba(190, 18, 60, 0.20)');
       grad.addColorStop(1, 'rgba(0, 0, 0, 0.0)');
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, 64, 64);
@@ -211,12 +210,12 @@ export class VRMAvatarController {
     const tex = new THREE.CanvasTexture(canvas);
 
     const mat = new THREE.PointsMaterial({
-      size: 0.045,
+      size: 0.038,
       map: tex,
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      opacity: 0.70,
+      opacity: 0.45,
     });
     this.particleMaterial = mat;
 
@@ -226,7 +225,7 @@ export class VRMAvatarController {
   }
 
   /**
-   * Poses humanoid arms downward into a relaxed companion A-pose
+   * Poses humanoid arms and fingers into a relaxed, feminine anime companion A-pose
    */
   private setNaturalAPose(vrm: VRM): void {
     if (!vrm.humanoid) return;
@@ -247,6 +246,46 @@ export class VRMAvatarController {
     }
     if (rightLowerArm) {
       rightLowerArm.rotation.set(0.12, -0.22, -0.35);
+    }
+
+    // Soften fingers into a relaxed, natural curve (fingers slightly bent inward, not rigid flat boards)
+    const fingerBones = [
+      // Left Hand Fingers
+      { name: 'leftIndexProximal', rot: [0, 0, 0.22] },
+      { name: 'leftIndexIntermediate', rot: [0, 0, 0.26] },
+      { name: 'leftMiddleProximal', rot: [0, 0, 0.24] },
+      { name: 'leftMiddleIntermediate', rot: [0, 0, 0.28] },
+      { name: 'leftRingProximal', rot: [0, 0, 0.26] },
+      { name: 'leftRingIntermediate', rot: [0, 0, 0.30] },
+      { name: 'leftLittleProximal', rot: [0, 0, 0.28] },
+      { name: 'leftLittleIntermediate', rot: [0, 0, 0.32] },
+      { name: 'leftThumbProximal', rot: [0, 0.10, 0.16] },
+      // Right Hand Fingers
+      { name: 'rightIndexProximal', rot: [0, 0, -0.22] },
+      { name: 'rightIndexIntermediate', rot: [0, 0, -0.26] },
+      { name: 'rightMiddleProximal', rot: [0, 0, -0.24] },
+      { name: 'rightMiddleIntermediate', rot: [0, 0, -0.28] },
+      { name: 'rightRingProximal', rot: [0, 0, -0.26] },
+      { name: 'rightRingIntermediate', rot: [0, 0, -0.30] },
+      { name: 'rightLittleProximal', rot: [0, 0, -0.28] },
+      { name: 'rightLittleIntermediate', rot: [0, 0, -0.32] },
+      { name: 'rightThumbProximal', rot: [0, -0.10, -0.16] },
+    ] as const;
+
+    fingerBones.forEach(({ name, rot }) => {
+      const node = vrm.humanoid?.getNormalizedBoneNode(name as any);
+      if (node) {
+        node.rotation.set(rot[0], rot[1], rot[2]);
+      }
+    });
+
+    const leftHand = vrm.humanoid.getNormalizedBoneNode('leftHand');
+    const rightHand = vrm.humanoid.getNormalizedBoneNode('rightHand');
+    if (leftHand) {
+      leftHand.rotation.set(0.08, 0.05, 0.14);
+    }
+    if (rightHand) {
+      rightHand.rotation.set(0.08, -0.05, -0.14);
     }
   }
 
@@ -414,8 +453,8 @@ export class VRMAvatarController {
   private applyBoneSlerp(dt: number, breathCycle: number): void {
     if (!this.vrm?.humanoid) return;
 
-    // Damping factor: fluid, weight-bearing, zero twitching (0.06 per frame at 60fps)
-    const slerpFactor = Math.min(1.0, 3.8 * dt);
+    // Damping factor: fluid, weight-bearing, zero twitching (anime-smooth interpolation)
+    const slerpFactor = Math.min(1.0, 3.2 * dt);
 
     const bones = [
       { name: 'leftUpperArm', target: this.targetBoneRotations.leftUpperArm },
@@ -433,58 +472,60 @@ export class VRMAvatarController {
       }
     });
 
-    // Breathing pitch on chest & spine
+    // Breathing pitch on chest & spine + subtle anime shoulder rise
     const chestNode = this.vrm.humanoid.getNormalizedBoneNode('chest');
     const spineNode = this.vrm.humanoid.getNormalizedBoneNode('spine');
+    const leftShoulder = this.vrm.humanoid.getNormalizedBoneNode('leftShoulder');
+    const rightShoulder = this.vrm.humanoid.getNormalizedBoneNode('rightShoulder');
+
     if (chestNode) {
       chestNode.quaternion.slerp(this.targetBoneRotations.chest, slerpFactor);
-      chestNode.rotation.x += breathCycle * 0.015;
+      chestNode.rotation.x += breathCycle * 0.016;
     }
     if (spineNode) {
       spineNode.rotation.x = breathCycle * 0.008;
     }
+    if (leftShoulder) {
+      leftShoulder.rotation.z = -breathCycle * 0.006;
+    }
+    if (rightShoulder) {
+      rightShoulder.rotation.z = breathCycle * 0.006;
+    }
   }
 
   /**
-   * Updates ambient glowing particle vortex in a swirling double-helix around Sofia
+   * Updates soft floating depth-of-field embers/sparkles (35-40 motes drifting with horizontal sine sway)
    */
   private updateParticles(dt: number, elapsedTime: number): void {
-    if (!this.particles || !this.particlePositions || !this.particleSeeds || !this.particleAngles || !this.particleRadii) return;
+    if (!this.particles || !this.particlePositions || !this.particleSeeds) return;
 
     const pos = this.particlePositions;
     const seeds = this.particleSeeds;
-    const angles = this.particleAngles;
-    const radii = this.particleRadii;
-    const speedMult = this.isSpeaking ? 1.65 : 1.0;
+    const speedMult = this.isSpeaking ? 1.45 : 1.0;
 
     for (let i = 0; i < this.particleCount; i++) {
       const idx = i * 3;
       const seed = seeds[i];
 
-      // Swirling double-helix rotational movement
-      angles[i] += (0.42 + (seed % 0.35)) * speedMult * dt;
-      const currentRadius = radii[i] + Math.sin(elapsedTime * 0.9 + seed) * 0.045;
+      // Gentle upward drift with soft horizontal sine sway
+      pos[idx + 1] += (0.065 * speedMult + 0.02 * Math.sin(seed)) * dt;
+      pos[idx + 0] += Math.sin(elapsedTime * 0.75 + seed) * (0.025 * dt);
+      pos[idx + 2] += Math.cos(elapsedTime * 0.55 + seed * 1.3) * (0.02 * dt);
 
-      pos[idx + 0] = Math.cos(angles[i]) * currentRadius;
-      pos[idx + 2] = Math.sin(angles[i]) * currentRadius;
-
-      // Drift upward with gentle sine flutter
-      pos[idx + 1] += (0.09 * speedMult + 0.03 * Math.cos(seed)) * dt;
-
-      // Wrap around when rising past bust ceiling
-      if (pos[idx + 1] > 1.68) {
-        pos[idx + 1] = 0.22;
-        angles[i] = Math.random() * Math.PI * 2;
-        radii[i] = 0.35 + Math.random() * 0.55;
+      // Gracefully recycle at ceiling
+      if (pos[idx + 1] > 1.85) {
+        pos[idx + 1] = 0.15;
+        pos[idx + 0] = (Math.random() - 0.5) * 1.8;
+        pos[idx + 2] = (Math.random() - 0.5) * 1.4;
       }
     }
 
     this.particles.geometry.attributes.position.needsUpdate = true;
 
-    // Vocal shimmer resonance
+    // Vocal shimmer resonance: motes glow brighter and drift faster when speaking
     if (this.particleMaterial) {
-      const targetOpacity = this.isSpeaking ? 0.92 : 0.62;
-      this.particleMaterial.opacity += (targetOpacity - this.particleMaterial.opacity) * (4.0 * dt);
+      const targetOpacity = this.isSpeaking ? 0.78 : 0.42;
+      this.particleMaterial.opacity += (targetOpacity - this.particleMaterial.opacity) * (3.5 * dt);
     }
   }
 
@@ -494,43 +535,57 @@ export class VRMAvatarController {
   public update(delta: number): void {
     if (!this.vrm || !this.isLoaded) return;
 
-    const dt = Math.min(0.1, delta);
+    const dt = Math.min(0.05, delta);
     const elapsedTime = this.clock.getElapsedTime();
 
-    // 1. Organic Living Breathing Cycle
-    const breathCycle = Math.sin(elapsedTime * 1.5);
+    // 1. Organic Anime Breathing Cycle (period ~3.8s, soft & relaxed)
+    const breathCycle = Math.sin(elapsedTime * (Math.PI * 2 / 3.8));
 
     // 2. Procedural Conversational Gestures & Bone Slerp
     this.updateConversationalGestures(dt, elapsedTime);
     this.applyBoneSlerp(dt, breathCycle);
 
-    // 3. Autonomous Living Companion Micro-Posture Shifts (Every 10-20 seconds)
+    // 3. Expressive Anime Head & Eye Life
+    // A) Organic 1°–3° head-tilts with smooth cubic ease-in-out interpolation every few seconds
     this.autonomousShiftTimer -= dt;
     if (this.autonomousShiftTimer <= 0) {
-      this.autonomousShiftTimer = 10.0 + Math.random() * 10.0;
-      
-      const newYaw = (Math.random() - 0.5) * 0.12;   // ~±3.5 degrees
-      const newPitch = (Math.random() - 0.5) * 0.06; // ~±1.7 degrees
-      const newRoll = (Math.random() - 0.5) * 0.04;  // ~±1.1 degrees
+      this.autonomousShiftTimer = 3.2 + Math.random() * 2.8;
+      this.headShiftDuration = 2.0 + Math.random() * 0.8;
+      this.headShiftProgress = 0;
+      this.startHeadEuler.copy(this.currentHeadEuler);
+
+      // Subtle, charming anime head roll (1°–3°), pitch, and slight yaw
+      const newRoll = (Math.random() - 0.5) * 0.055;  // ~±1.6 degrees
+      const newPitch = (Math.random() - 0.5) * 0.045; // ~±1.3 degrees
+      const newYaw = (Math.random() - 0.5) * 0.065;   // ~±1.9 degrees
       this.targetHeadEuler.set(newPitch, newYaw, newRoll, 'YXZ');
     }
 
-    const postureDamping = Math.min(1.0, 1.8 * dt);
-    this.currentHeadEuler.x += (this.targetHeadEuler.x - this.currentHeadEuler.x) * postureDamping;
-    this.currentHeadEuler.y += (this.targetHeadEuler.y - this.currentHeadEuler.y) * postureDamping;
-    this.currentHeadEuler.z += (this.targetHeadEuler.z - this.currentHeadEuler.z) * postureDamping;
+    if (this.headShiftProgress < this.headShiftDuration) {
+      this.headShiftProgress += dt;
+      const t = Math.min(1.0, this.headShiftProgress / this.headShiftDuration);
+      // Cubic ease-in-out smoothing curve
+      const ease = t * t * (3 - 2 * t);
+      this.currentHeadEuler.x = this.startHeadEuler.x + (this.targetHeadEuler.x - this.startHeadEuler.x) * ease;
+      this.currentHeadEuler.y = this.startHeadEuler.y + (this.targetHeadEuler.y - this.startHeadEuler.y) * ease;
+      this.currentHeadEuler.z = this.startHeadEuler.z + (this.targetHeadEuler.z - this.startHeadEuler.z) * ease;
+    }
 
-    const microYaw = Math.sin(elapsedTime * 0.6) * 0.012;
-    const microPitch = Math.cos(elapsedTime * 0.8) * 0.008;
+    // Dynamic sentence emphasis nod & conversational tilt during speech
+    const speechNod = this.isSpeaking ? Math.sin(elapsedTime * 4.2) * 0.022 : 0;
+    const speechTilt = this.isSpeaking ? Math.cos(elapsedTime * 2.1) * 0.015 : 0;
+
+    const microYaw = Math.sin(elapsedTime * 0.5) * 0.008;
+    const microPitch = Math.cos(elapsedTime * 0.7) * 0.006;
 
     const headNode = this.vrm.humanoid?.getNormalizedBoneNode('head');
     const neckNode = this.vrm.humanoid?.getNormalizedBoneNode('neck');
 
     if (headNode) {
       headNode.rotation.set(
-        this.currentHeadEuler.x * 0.75 + microPitch,
+        this.currentHeadEuler.x * 0.75 + microPitch + speechNod,
         this.currentHeadEuler.y * 0.75 + microYaw,
-        this.currentHeadEuler.z * 0.75
+        this.currentHeadEuler.z * 0.75 + speechTilt
       );
     }
     if (neckNode) {
@@ -541,19 +596,49 @@ export class VRMAvatarController {
       );
     }
 
-    // 4. Natural Rhythmic Blinking (smooth blendshape closure every 3.5 to 6.0s)
-    this.blinkTimer -= dt;
-    if (this.blinkTimer <= 0 && !this.isBlinking) {
-      this.isBlinking = true;
-      this.blinkProgress = 0;
-      this.blinkTimer = 3.5 + Math.random() * 2.5;
+    // B) Realistic Eye Saccades (Subtle micro eye-shifts every 1.8–3.2s)
+    this.eyeSaccadeTimer -= dt;
+    if (this.eyeSaccadeTimer <= 0) {
+      this.eyeSaccadeTimer = 1.8 + Math.random() * 1.5;
+      this.targetEyeYaw = (Math.random() - 0.5) * 0.035;
+      this.targetEyePitch = (Math.random() - 0.5) * 0.018;
+    }
+    const eyeLerp = Math.min(1.0, 10.0 * dt);
+    this.currentEyeYaw += (this.targetEyeYaw - this.currentEyeYaw) * eyeLerp;
+    this.currentEyePitch += (this.targetEyePitch - this.currentEyePitch) * eyeLerp;
+
+    const leftEye = this.vrm.humanoid?.getNormalizedBoneNode('leftEye');
+    const rightEye = this.vrm.humanoid?.getNormalizedBoneNode('rightEye');
+    if (leftEye) leftEye.rotation.set(this.currentEyePitch, this.currentEyeYaw, 0);
+    if (rightEye) rightEye.rotation.set(this.currentEyePitch, this.currentEyeYaw, 0);
+
+    // 4. Natural Rhythmic Blinking with Organic Double-Blinks
+    if (this.doubleBlinkPending) {
+      this.doubleBlinkTimer -= dt;
+      if (this.doubleBlinkTimer <= 0) {
+        this.doubleBlinkPending = false;
+        this.isBlinking = true;
+        this.blinkProgress = 0;
+      }
+    } else {
+      this.blinkTimer -= dt;
+      if (this.blinkTimer <= 0 && !this.isBlinking) {
+        this.isBlinking = true;
+        this.blinkProgress = 0;
+        this.blinkTimer = 3.2 + Math.random() * 2.4;
+      }
     }
 
     if (this.isBlinking) {
-      this.blinkProgress += dt * 8.0;
+      this.blinkProgress += dt * 8.5;
       if (this.blinkProgress >= Math.PI) {
         this.isBlinking = false;
         this.vrm.expressionManager?.setValue('blink', 0);
+        // 28% chance of an expressive anime double-blink
+        if (!this.doubleBlinkPending && Math.random() < 0.28) {
+          this.doubleBlinkPending = true;
+          this.doubleBlinkTimer = 0.12;
+        }
       } else {
         const blinkVal = Math.sin(this.blinkProgress);
         this.vrm.expressionManager?.setValue('blink', blinkVal);
@@ -604,10 +689,10 @@ export class VRMAvatarController {
       this.vrm?.expressionManager?.setValue(vKey as VRMExpressionPresetName, this.currentVisemes[vKey]);
     });
 
-    // 7. Update Ambient Particles
+    // 7. Update Ambient Depth-of-Field Embers
     this.updateParticles(dt, elapsedTime);
 
-    // 8. Update VRM Runtime (MToon shaders, SpringBone physics)
+    // 8. Update VRM Runtime (MToon shaders & secondary SpringBone hair physics!)
     this.vrm.update(dt);
   }
 }

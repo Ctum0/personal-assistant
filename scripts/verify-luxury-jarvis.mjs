@@ -13,8 +13,14 @@ async function verifyLuxuryJarvis() {
   console.log('Navigating to http://localhost:3000/...');
   await page.goto('http://localhost:3000/', { waitUntil: 'networkidle' });
 
-  // Wait 4 seconds for VRM model and particles to load
-  await page.waitForTimeout(4000);
+  // Wait for VRM model to finish loading and spinner to detach
+  console.log('Waiting for VRM model to finish initializing...');
+  try {
+    await page.waitForSelector('text=SOFIA INITIALIZING...', { state: 'detached', timeout: 15000 });
+  } catch {
+    console.log('Timed out waiting for detachment, proceeding...');
+  }
+  await page.waitForTimeout(1500);
 
   // Check scroll metrics
   const scrollMetrics = await page.evaluate(() => {
