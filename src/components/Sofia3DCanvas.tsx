@@ -170,8 +170,8 @@ export default function Sofia3DCanvas({
       ref={containerRef}
       className="relative w-full h-full flex items-center justify-center overflow-visible select-none pointer-events-none"
       style={{
-        maskImage: 'linear-gradient(to bottom, rgba(0,0,0,1) 82%, rgba(0,0,0,0) 100%)',
-        WebkitMaskImage: 'linear-gradient(to bottom, rgba(0,0,0,1) 82%, rgba(0,0,0,0) 100%)',
+        maskImage: 'linear-gradient(to bottom, rgba(0, 0, 0, 1) 60%, rgba(0, 0, 0, 0) 95%)',
+        WebkitMaskImage: 'linear-gradient(to bottom, rgba(0, 0, 0, 1) 60%, rgba(0, 0, 0, 0) 95%)',
       }}
     >
       {/* 3D WebGL Canvas — 100% transparent, open space stage */}

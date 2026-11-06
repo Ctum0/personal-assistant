@@ -39,7 +39,8 @@ async function verifyLuxuryJarvis() {
       hasTopPillBars: !!document.body.innerText.includes('HERMES AI ONLINE • :8642'),
       hasInspectButtons: !!document.querySelector('button[aria-label*="view"]'),
       hasOpenHorizonStage: !!document.querySelector('section[aria-label="Sofia Companion Stage"]'),
-      hasGlassConsoleRail: !!document.querySelector('[class*="rounded-t-"]'),
+      hasSolidFloatingShelf: !!document.querySelector('.rounded-t-\\[2\\.5rem\\], .rounded-t-\\[3rem\\]'),
+      hasLaserDatumBeam: !!document.querySelector('.h-\\[1px\\]'),
       hasCommandInput: !!document.querySelector('#jarvis-command-input'),
     };
   });

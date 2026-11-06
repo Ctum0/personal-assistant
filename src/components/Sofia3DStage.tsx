@@ -274,7 +274,7 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
             aria-hidden="true"
           />
 
-          {/* 3D Canvas Stage: Wide central stage without circular mask constraint */}
+          {/* 3D Canvas Stage: Weightless Holographic Dissolve Stage */}
           <div className="relative w-full h-[460px] sm:h-[500px] md:h-[540px] flex items-center justify-center z-10 overflow-visible">
             <Sofia3DCanvas
               expression={expression}
@@ -283,30 +283,27 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
               onOpenVoiceModal={onOpenVoiceModal}
             />
 
-            {/* Floating Glass Console Rail / Horizon Command Ledge (The "Desk" Illusion) */}
-            {/* Anchored precisely across the lower cutoff threshold of the model */}
+            {/* 3. Razor-Thin Luminous Horizon Beam (1px Glow Line) */}
+            {/* Anchored at the holographic dissolve threshold directly below torso */}
             <div 
-              className="absolute bottom-0 inset-x-2 sm:inset-x-6 md:inset-x-12 h-16 sm:h-20 md:h-24 rounded-t-[3rem] backdrop-blur-2xl bg-[#090206]/60 border-t border-x border-[#8b1538]/30 shadow-[0_-12px_35px_rgba(139,21,56,0.18)] z-20 flex flex-col items-center justify-start pt-2 pointer-events-none overflow-hidden"
+              className="absolute bottom-1 left-1/2 -translate-x-1/2 w-[320px] sm:w-[380px] h-[1px] pointer-events-none z-20"
+              style={{
+                background: 'linear-gradient(90deg, transparent 0%, rgba(225, 29, 72, 0.7) 35%, rgba(255, 200, 220, 0.95) 50%, rgba(225, 29, 72, 0.7) 65%, transparent 100%)',
+                boxShadow: '0 0 12px rgba(225, 29, 72, 0.4), 0 0 4px rgba(255, 200, 220, 0.6)',
+              }}
               aria-hidden="true"
-            >
-              {/* Sleek specular rim highlight across curved top edge */}
-              <div className="absolute top-0 inset-x-10 h-[1.5px] bg-gradient-to-r from-transparent via-[#f5d0a9]/40 to-transparent" />
-              {/* Subtle ambient light bar */}
-              <div className="w-16 h-1 rounded-full bg-rose-500/25 mt-1" />
-              {/* Soft interior ambient velvet glass gradient */}
-              <div className="absolute inset-0 bg-gradient-to-b from-[#8b1538]/15 via-[#090206]/50 to-[#040103]/80 -z-10" />
-            </div>
+            />
           </div>
         </div>
       </section>
 
       {/* 3. Bottom Subtitle Dialogue Line & Minimal Glassy Command Dock */}
-      <section aria-label="Spoken Dialogue and Command Dock" className="relative z-20 w-full max-w-2xl px-4 pb-5 sm:pb-6 flex flex-col items-center space-y-2.5 sm:space-y-3 shrink-0">
-        {/* Real-time Subtitle Dialogue Line */}
+      <section aria-label="Spoken Dialogue and Command Dock" className="relative z-20 w-full max-w-2xl px-4 pb-5 sm:pb-6 flex flex-col items-center space-y-3 shrink-0">
+        {/* Real-time Subtitle Dialogue Line — positioned cleanly 28px below datum line */}
         <div 
           onClick={isSpeaking ? onInterrupt : () => onSpeak(dialogue)}
           title={isSpeaking ? "Click to interrupt" : "Click to replay audio"}
-          className="text-center max-w-xl min-h-[48px] flex flex-col items-center justify-center px-4 cursor-pointer group"
+          className="text-center max-w-xl min-h-[44px] flex flex-col items-center justify-center px-4 cursor-pointer group mt-[28px]"
         >
           <p 
             className={`text-sm sm:text-base font-sans tracking-[0.04em] leading-relaxed transition-all duration-500 ${
