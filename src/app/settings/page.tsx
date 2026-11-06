@@ -13,11 +13,14 @@ import {
   Zap,
 } from 'lucide-react';
 import { SofiaSettings, defaultSettings } from '@/lib/types';
+import { speakSofia, stopSpeaking } from '@/lib/voice';
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SofiaSettings>(defaultSettings);
+  const [budget, setBudget] = useState<{ used: number; remaining: number; cap: number } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isTestingVoice, setIsTestingVoice] = useState(false);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -26,6 +29,9 @@ export default function SettingsPage() {
         if (res.ok) {
           const data = await res.json();
           setSettings(data);
+          if (data.elevenlabs_budget) {
+            setBudget(data.elevenlabs_budget);
+          }
         }
       } catch (err) {
         console.error('Failed to load settings:', err);
@@ -404,25 +410,6 @@ export default function SettingsPage() {
                 />
               </div>
             </div>
-
-            <div className="pt-2 flex items-center justify-between">
-              <label htmlFor="setting-cua-enabled" className="text-rose-200 font-medium cursor-pointer">
-                Enable Background Computer Use (CUA Driver)
-              </label>
-              <input
-                id="setting-cua-enabled"
-                name="computer_use_enabled"
-                type="checkbox"
-                checked={settings.hermes.computer_use_enabled}
-                onChange={(e) =>
-                  setSettings({
-                    ...settings,
-                    hermes: { ...settings.hermes, computer_use_enabled: e.target.checked },
-                  })
-                }
-                className="w-5 h-5 rounded bg-rose-950 border-rose-500/40 text-rose-600 focus:ring-rose-500 cursor-pointer"
-              />
-            </div>
           </div>
         </section>
 
@@ -530,6 +517,128 @@ export default function SettingsPage() {
                 />
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* 5. Voice & Speech Synthesis */}
+        <section aria-labelledby="voice-heading" className="glass-card p-6 rounded-3xl border border-rose-500/25 space-y-5 lg:col-span-2">
+          <div className="flex items-center justify-between border-b border-rose-500/20 pb-3">
+            <div className="flex items-center space-x-2 text-rose-100 font-mono text-sm font-bold">
+              <Volume2 className="w-4 h-4 text-rose-400" aria-hidden="true" />
+              <h2 id="voice-heading">Voice & Speech Synthesis</h2>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                setIsTestingVoice(true);
+                await speakSofia("Testing voice synthesis for Sofia. Ready for focus sessions.", {
+                  provider: settings.voice?.provider,
+                  onEnd: () => setIsTestingVoice(false),
+                  onError: () => setIsTestingVoice(false),
+                });
+              }}
+              disabled={isTestingVoice}
+              className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-burgundy-950/70 hover:bg-burgundy-900/60 border border-burgundy-800/40 text-xs font-mono text-rose-200 hover:text-white transition-all shadow-sm"
+            >
+              <Volume2 className={`w-3.5 h-3.5 ${isTestingVoice ? 'animate-bounce text-rose-400' : ''}`} />
+              <span>{isTestingVoice ? 'Playing...' : 'Test Voice Preview'}</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs font-mono">
+            {/* Provider Selection */}
+            <div className="space-y-1.5">
+              <label htmlFor="setting-voice-provider" className="text-rose-200 font-medium">
+                Voice Provider
+              </label>
+              <select
+                id="setting-voice-provider"
+                value={settings.voice?.provider || 'edge'}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    voice: {
+                      ...settings.voice,
+                      provider: e.target.value as 'edge' | 'elevenlabs' | 'browser',
+                    },
+                  })
+                }
+                className="w-full glass-input px-3 py-2 rounded-xl text-xs font-mono min-h-[44px] bg-[#1a040e]"
+              >
+                <option value="edge">Edge TTS (Unlimited, Free Default)</option>
+                <option value="elevenlabs">ElevenLabs (Budget Enforced)</option>
+                <option value="browser">Web SpeechSynthesis (Client Fallback)</option>
+              </select>
+            </div>
+
+            {/* Edge Voice Picker */}
+            <div className="space-y-1.5">
+              <label htmlFor="setting-voice-name" className="text-rose-200 font-medium">
+                Edge Voice Model
+              </label>
+              <select
+                id="setting-voice-name"
+                value={settings.voice?.voice_name || 'en-US-AvaNeural'}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    voice: { ...settings.voice, voice_name: e.target.value },
+                  })
+                }
+                className="w-full glass-input px-3 py-2 rounded-xl text-xs font-mono min-h-[44px] bg-[#1a040e]"
+              >
+                <option value="en-US-AvaNeural">en-US-AvaNeural (Natural, Warm)</option>
+                <option value="en-US-JennyNeural">en-US-JennyNeural (Expressive)</option>
+                <option value="en-US-AriaNeural">en-US-AriaNeural (Direct, Professional)</option>
+              </select>
+            </div>
+
+            {/* ElevenLabs Voice ID & Budget */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center">
+                <label htmlFor="setting-elevenlabs-voice" className="text-rose-200 font-medium">
+                  ElevenLabs Voice ID
+                </label>
+                {budget && (
+                  <span className="text-[10px] text-rose-400 font-mono">
+                    {budget.used} / {budget.cap} chars
+                  </span>
+                )}
+              </div>
+              <input
+                id="setting-elevenlabs-voice"
+                type="text"
+                value={settings.voice?.elevenlabs_voice_id || 'EXAVITQu4vr4xnSDxMaL'}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    voice: { ...settings.voice, elevenlabs_voice_id: e.target.value },
+                  })
+                }
+                className="w-full glass-input px-3 py-2 rounded-xl text-xs font-mono min-h-[44px]"
+              />
+            </div>
+          </div>
+
+          {/* Auto Speak Toggle */}
+          <div className="flex items-center justify-between p-3 rounded-xl bg-burgundy-950/40 border border-burgundy-800/30">
+            <div>
+              <div className="text-xs font-bold font-mono text-rose-100">Auto-Speak Sofia Responses</div>
+              <div className="text-[11px] text-rose-300 font-sans">
+                Automatically voices assistant replies when user submits text or speech.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={settings.voice?.auto_speak ?? true}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  voice: { ...settings.voice, auto_speak: e.target.checked },
+                })
+              }
+              className="w-5 h-5 rounded bg-rose-950 border-rose-500/40 text-rose-600 focus:ring-rose-500 cursor-pointer"
+            />
           </div>
         </section>
       </div>
