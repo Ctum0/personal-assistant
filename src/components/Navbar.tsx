@@ -7,7 +7,6 @@ import {
   Sparkles,
   Home,
   MessageSquare,
-  Monitor,
   Clock,
   TrendingUp,
   CheckSquare,
@@ -20,13 +19,7 @@ import {
 
 export const Navbar: React.FC = () => {
   const pathname = usePathname();
-  const [hermesOnline, setHermesOnline] = useState(true);
   const [killSwitch, setKillSwitch] = useState(false);
-
-  // Home page is a dedicated full-bleed luxury Jarvis companion console
-  if (pathname === '/') {
-    return null;
-  }
 
   useEffect(() => {
     const checkStatus = async () => {
@@ -42,6 +35,11 @@ export const Navbar: React.FC = () => {
     };
     checkStatus();
   }, []);
+
+  // Home page is a dedicated full-bleed luxury Jarvis companion console
+  if (pathname === '/') {
+    return null;
+  }
 
   const toggleKillSwitch = async () => {
     const nextVal = !killSwitch;
@@ -63,7 +61,6 @@ export const Navbar: React.FC = () => {
   const navItems = [
     { label: 'Home', href: '/', icon: Home },
     { label: 'Chat', href: '/chat', icon: MessageSquare },
-    { label: 'Computer Use', href: '/computer-use', icon: Monitor },
     { label: 'Timeline', href: '/timeline', icon: Clock },
     { label: 'History', href: '/history', icon: TrendingUp },
     { label: 'Tasks', href: '/tasks', icon: CheckSquare },
@@ -124,15 +121,13 @@ export const Navbar: React.FC = () => {
 
         {/* Live Status + Emergency Kill Switch */}
         <div className="flex items-center space-x-3">
-          {/* Hermes & CUA Driver badge */}
+          {/* Brain badge */}
           <div className="hidden lg:flex items-center space-x-2 px-3 py-1.5 rounded-full bg-rose-950/60 border border-rose-500/30 text-[11px] font-mono text-rose-200">
             <span className="flex h-2 w-2 relative" aria-hidden="true">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
             </span>
-            <span>Hermes AI :8642</span>
-            <span className="text-rose-500/40" aria-hidden="true">|</span>
-            <span className="text-rose-200">CUA Background</span>
+            <span>Brain: LiteLLM · flash</span>
           </div>
 
           {/* Kill Switch Toggle Button */}

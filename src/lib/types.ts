@@ -73,14 +73,12 @@ export interface SofiaSettings {
   personality: PersonalityDials;
   hermes: {
     base_url: string;
-    api_key: string;
     model: string;
     provider: string;
     computer_use_enabled: boolean;
   };
   voice: {
-    provider: 'browser' | 'elevenlabs';
-    elevenlabs_api_key?: string;
+    provider: 'edge' | 'elevenlabs' | 'browser';
     elevenlabs_voice_id?: string;
     auto_speak: boolean;
     voice_name: string;
@@ -137,17 +135,15 @@ export const defaultSettings: SofiaSettings = {
   },
   hermes: {
     base_url: 'https://ai-proxy.zenova.services/v1',
-    api_key: '',
     model: 'deepseek-v4.1-flash',
     provider: 'litellm',
     computer_use_enabled: false,
   },
   voice: {
-    provider: 'elevenlabs',
-    elevenlabs_api_key: '',
+    provider: 'edge',
     elevenlabs_voice_id: 'EXAVITQu4vr4xnSDxMaL',
     auto_speak: true,
-    voice_name: 'Bella',
+    voice_name: 'en-US-AvaNeural',
     rate: 1.0,
     pitch: 1.05,
   },

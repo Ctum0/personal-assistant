@@ -364,7 +364,7 @@ ${pinnedNotes.map((n, i) => `${i + 1}. ${n.text}`).join('\n')}`;
 
   // LiteLLM configuration from env / settings
   const baseUrl = process.env.LITELLM_BASE_URL || settings.hermes?.base_url || 'https://ai-proxy.zenova.services/v1';
-  const apiKey = process.env.LITELLM_API_KEY || settings.hermes?.api_key || '';
+  const apiKey = process.env.LITELLM_API_KEY || '';
   const model = process.env.LITELLM_MODEL || settings.hermes?.model || 'deepseek-v4.1-flash';
 
   try {

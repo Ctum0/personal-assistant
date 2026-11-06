@@ -1,6 +1,16 @@
 @import "tailwindcss";
 
 @theme {
+  --color-burgundy-50:  #fdf2f4;
+  --color-burgundy-100: #fbe6eb;
+  --color-burgundy-200: #f7d0d9;
+  --color-burgundy-300: #f0aab9;
+  --color-burgundy-400: #e57790;
+  --color-burgundy-500: #d44d6d;
+  --color-burgundy-600: #bd2f52;
+  --color-burgundy-700: #9e2240;
+  --color-burgundy-800: #831f37;
+  --color-burgundy-900: #6f1e32;
   --color-burgundy-950: #14030a;
 }
 

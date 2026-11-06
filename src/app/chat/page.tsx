@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { SofiaAvatar } from '@/components/SofiaAvatar';
-import { VoiceDock } from '@/components/VoiceDock';
 import { ChatMessage, SofiaExpression } from '@/lib/types';
 import { speakSofia, stopSpeaking as haltSpeaking } from '@/lib/voice';
 import {
@@ -296,13 +295,8 @@ export default function ChatPage() {
             ))}
           </div>
 
-          {/* Voice Dock & Text Input */}
+          {/* Chat Input */}
           <div className="p-4 border-t border-rose-500/25 space-y-3 bg-[#110209]/85 backdrop-blur-xl">
-            <VoiceDock
-              onTranscript={(t) => handleSendMessage(t)}
-              isSpeaking={isSpeaking}
-              onStopSpeaking={stopSpeaking}
-            />
 
             <form
               onSubmit={(e) => {

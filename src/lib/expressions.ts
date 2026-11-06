@@ -22,12 +22,12 @@ export function getExpressionFromMood(mood?: string | null): SofiaExpression {
 }
 
 export const EXPRESSION_IMAGES: Record<SofiaExpression, string> = {
-  neutral: '/sofia/expressions/neutral.png',
-  pleased: '/sofia/expressions/pleased.png',
-  amused: '/sofia/expressions/amused.png',
-  focused: '/sofia/expressions/focused.png',
-  stern: '/sofia/expressions/stern.png',
-  disappointed: '/sofia/expressions/disappointed.png',
-  concerned: '/sofia/expressions/concerned.png',
-  sleepy: '/sofia/expressions/sleepy.png',
+  neutral: '/sofia/expressions/neutral.webp',
+  pleased: '/sofia/expressions/pleased.webp',
+  amused: '/sofia/expressions/amused.webp',
+  focused: '/sofia/expressions/focused.webp',
+  stern: '/sofia/expressions/stern.webp',
+  disappointed: '/sofia/expressions/disappointed.webp',
+  concerned: '/sofia/expressions/concerned.webp',
+  sleepy: '/sofia/expressions/sleepy.webp',
 };

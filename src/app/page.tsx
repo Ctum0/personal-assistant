@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { SofiaAvatar } from '@/components/SofiaAvatar';
-import { VoiceDock } from '@/components/VoiceDock';
 import { SofiaPanel } from '@/components/SofiaPanel';
 import { SofiaExpression, TaskItem, DayStats } from '@/lib/types';
 import { getExpressionFromMood } from '@/lib/expressions';
@@ -449,14 +448,8 @@ export default function SofiaDynamicJarvisStage() {
         )}
       </div>
 
-      {/* BOTTOM UNIFIED DOCK: VOICEDOCK + TEXT INPUT */}
+      {/* BOTTOM UNIFIED DOCK: TEXT INPUT */}
       <footer className="relative z-20 px-8 pb-5 pt-1 max-w-3xl w-full mx-auto flex flex-col gap-2.5">
-        {/* Unified VoiceDock */}
-        <VoiceDock
-          onTranscript={(text) => handleSendPrompt(text)}
-          isSpeaking={isSpeaking}
-          onStopSpeaking={handleInterrupt}
-        />
 
         {/* Unified Text Input Pill */}
         <form

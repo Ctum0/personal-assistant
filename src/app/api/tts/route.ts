@@ -17,7 +17,6 @@ export async function POST(req: NextRequest) {
 
     const apiKey =
       body.apiKey ||
-      settings.voice.elevenlabs_api_key ||
       process.env.ELEVENLABS_API_KEY;
 
     // Default to Bella or configured voice
