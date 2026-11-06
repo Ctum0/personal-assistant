@@ -4,6 +4,7 @@ import { getDayScore, getDayStats, getSettings } from './db';
 import { SofiaExpression, SofiaSettings } from './types';
 import { evaluateConsequenceRequest } from './policy';
 import { Pane, SofiaTurn, SofiaMood } from './stage';
+import { executeTool, buildOpenAITools, buildGeminiFunctionDeclarations } from './tools';
 
 export interface BrainTurnContext {
   now: string;
@@ -531,112 +532,202 @@ ${pinnedNotes.map((n, i) => `${i + 1}. ${n.text}`).join('\n')}`;
   messages.push({ role: 'user', content: userMessage });
 
   const baseUrl = process.env.LITELLM_BASE_URL || settings.hermes?.base_url || 'https://ai-proxy.zenova.services/v1';
-  const apiKey = process.env.LITELLM_API_KEY || '';
+  const apiKey = (process.env.LITELLM_API_KEY || '').trim();
   const model = process.env.LITELLM_MODEL || settings.hermes?.model || 'deepseek-v4.1-flash';
 
   const collectedPanes: Pane[] = [];
   const executedToolCalls: any[] = [];
 
-  // Tool-call loop (up to 2 iterations max)
-  let loopCount = 0;
-  while (loopCount < 2) {
-    loopCount++;
+  // 1. Try LiteLLM if API key is provided
+  if (apiKey) {
+    let loopCount = 0;
+    while (loopCount < 2) {
+      loopCount++;
 
-    try {
-      const res = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          tools: SOFIA_TOOLS,
-          tool_choice: 'auto',
-          max_tokens: 600,
-          temperature: 0.6,
-        }),
-        signal: AbortSignal.timeout(90000),
-      });
+      try {
+        const res = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            tools: buildOpenAITools(),
+            tool_choice: 'auto',
+            max_tokens: 600,
+            temperature: 0.6,
+          }),
+          signal: AbortSignal.timeout(45000),
+        });
 
-      if (!res.ok) {
+        if (!res.ok) {
+          console.warn('LiteLLM returned status:', res.status);
+          break;
+        }
+
+        const data = await res.json();
+        const choice = data.choices?.[0];
+        const message = choice?.message;
+
+        if (!message) break;
+
+        // Check if model emitted function tool calls
+        if (message.tool_calls && message.tool_calls.length > 0) {
+          messages.push(message);
+
+          for (const tc of message.tool_calls) {
+            executedToolCalls.push(tc);
+            let parsedArgs = {};
+            try {
+              parsedArgs = JSON.parse(tc.function.arguments || '{}');
+            } catch {}
+
+            const toolExec = await executeTool(db, tc.function.name, parsedArgs, settings);
+            if (toolExec.pane) {
+              collectedPanes.push(toolExec.pane);
+            }
+
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify(toolExec.result ?? { error: toolExec.error }),
+            });
+          }
+          continue; // Loop again to get final assistant response
+        }
+
+        // Final assistant response content
+        const rawText = message.content || '';
+        const turn = parseTurn(rawText);
+
+        const mergedPanes = [...collectedPanes, ...(turn.panes || [])];
+        turn.panes = mergedPanes.length > 0 ? mergedPanes : undefined;
+
+        return {
+          text: turn.say,
+          say: turn.say,
+          mood: turn.mood as SofiaExpression,
+          panes: turn.panes,
+          toolCalls: executedToolCalls.length > 0 ? executedToolCalls : undefined,
+          turn,
+        };
+      } catch (err) {
+        console.warn('LiteLLM request error:', err);
         break;
       }
+    }
+  }
 
-      const data = await res.json();
-      const choice = data.choices?.[0];
-      const message = choice?.message;
+  // 2. Direct Gemini LLM Dispatch (Ultra fast, supports all 22 tools)
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    try {
+      const geminiTools = [{ functionDeclarations: buildGeminiFunctionDeclarations() }];
+      const geminiContents: any[] = [];
 
-      if (!message) break;
+      for (const h of recentHistory) {
+        const role = h.role === 'assistant' ? 'model' : 'user';
+        geminiContents.push({ role, parts: [{ text: h.content }] });
+      }
+      geminiContents.push({ role: 'user', parts: [{ text: userMessage }] });
 
-      // Check if model emitted function tool calls
-      if (message.tool_calls && message.tool_calls.length > 0) {
-        messages.push(message);
+      const geminiSystemPrompt = `${systemPrompt}\n\n${contextMessage}\n\nAlways stay in character as Sofia. Output response as JSON with format: {"say": "string", "mood": "focused|pleased|amused|stern|disappointed|concerned|sleepy|neutral"}. You have tools to get real telemetry stats, timeline, tasks, memory, screenshot, shell execution, and files. Use them whenever appropriate.`;
 
-        for (const tc of message.tool_calls) {
-          executedToolCalls.push(tc);
-          let parsedArgs = {};
-          try {
-            parsedArgs = JSON.parse(tc.function.arguments || '{}');
-          } catch {}
+      let geminiLoops = 0;
+      while (geminiLoops < 3) {
+        geminiLoops++;
 
-          const toolExec = executeSofiaTool(db, tc.function.name, parsedArgs, settings);
+        const geminiRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: geminiContents,
+              systemInstruction: { parts: [{ text: geminiSystemPrompt }] },
+              tools: geminiTools,
+              generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 800,
+              },
+            }),
+            signal: AbortSignal.timeout(25000),
+          }
+        );
+
+        if (!geminiRes.ok) {
+          const errText = await geminiRes.text();
+          console.warn('Gemini chat error:', geminiRes.status, errText);
+          break;
+        }
+
+        const geminiData = await geminiRes.json();
+        const candidate = geminiData.candidates?.[0];
+        if (!candidate) break;
+
+        const parts = candidate.content?.parts || [];
+        const funcCallPart = parts.find((p: any) => p.functionCall);
+
+        if (funcCallPart?.functionCall) {
+          const fn = funcCallPart.functionCall;
+          executedToolCalls.push(fn);
+
+          const toolExec = await executeTool(db, fn.name, fn.args || {}, settings);
           if (toolExec.pane) {
             collectedPanes.push(toolExec.pane);
           }
 
-          messages.push({
-            role: 'tool',
-            tool_call_id: tc.id,
-            content: JSON.stringify(toolExec.result ?? { error: toolExec.error }),
+          // Push model turn (includes thoughtSignature and functionCall)
+          geminiContents.push(candidate.content);
+
+          // Push tool response with role 'user'
+          geminiContents.push({
+            role: 'user',
+            parts: [
+              {
+                functionResponse: {
+                  name: fn.name,
+                  response: { name: fn.name, content: toolExec.result ?? { error: toolExec.error } },
+                },
+              },
+            ],
           });
+          continue;
         }
-        continue; // Loop again to get final assistant response
+
+        // Standard text response
+        const textPart = parts.find((p: any) => p.text);
+        const rawText = textPart?.text || '';
+        const turn = parseTurn(rawText);
+
+        const mergedPanes = [...collectedPanes, ...(turn.panes || [])];
+        turn.panes = mergedPanes.length > 0 ? mergedPanes : undefined;
+
+        return {
+          text: turn.say,
+          say: turn.say,
+          mood: turn.mood as SofiaExpression,
+          panes: turn.panes,
+          toolCalls: executedToolCalls.length > 0 ? executedToolCalls : undefined,
+          turn,
+        };
       }
-
-      // Final assistant response content
-      const rawText = message.content || '';
-      const turn = parseTurn(rawText);
-
-      // Merge model panes and tool generated panes
-      const mergedPanes = [...collectedPanes, ...(turn.panes || [])];
-      turn.panes = mergedPanes.length > 0 ? mergedPanes : undefined;
-
-      return {
-        text: turn.say,
-        say: turn.say,
-        mood: turn.mood as SofiaExpression,
-        panes: turn.panes,
-        toolCalls: executedToolCalls.length > 0 ? executedToolCalls : undefined,
-        turn,
-      };
-    } catch (err) {
-      console.warn('LiteLLM request error:', err);
-      break;
+    } catch (gErr) {
+      console.warn('Gemini dispatch error:', gErr);
     }
   }
 
-  // Graceful deterministic fact-based fallback citing day_stats
+  // 3. Graceful fact-based fallback (incorporating user context to prevent static repetition)
   const stats = getDayStats(db, today);
   const scoreData = getDayScore(db, today);
   const leisurePct = stats.active_min > 0 ? Math.round((stats.leisure_min / stats.active_min) * 100) : 0;
 
-  if (stats.coverage < 0.8) {
-    const turn: SofiaTurn = {
-      say: "I only saw part of your day. 4 hours unaccounted. I'm not scoring what I can't see.",
-      mood: 'concerned',
-    };
-    return {
-      text: turn.say,
-      say: turn.say,
-      mood: 'concerned',
-      turn,
-    };
-  }
+  const dynamicSay = `Acknowledged. I'm operating on local telemetry cache: Score ${scoreData.score.toFixed(0)}, ${stats.commits} commits, ${stats.work_min}m focus logged. Ready when you are.`;
 
   const turn: SofiaTurn = {
-    say: `Score ${scoreData.score.toFixed(0)}. ${stats.commits} commits, ${leisurePct} percent leisure, ${stats.work_min} focus minutes logged. Keep to the pace.`,
+    say: dynamicSay,
     mood: scoreData.score >= 8 ? 'pleased' : scoreData.score < 5 ? 'stern' : 'focused',
     panes: collectedPanes.length > 0 ? collectedPanes : undefined,
   };
