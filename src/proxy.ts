@@ -4,18 +4,29 @@ import { verifyApiAuth } from './lib/auth';
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Static assets and public health check are always allowed
+  // 1. Static assets and public health check are always allowed
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/sofia') ||
     pathname.startsWith('/images') ||
     pathname === '/favicon.ico' ||
-    pathname === '/api/health'
+    pathname === '/api/health' ||
+    pathname === '/unlock' ||
+    pathname === '/api/auth'
   ) {
     return NextResponse.next();
   }
 
-  // Enforce API token on all /api/* routes
+  // 2. Cron and Ingest routes have their own secret headers
+  if (pathname.startsWith('/api/cron') || pathname.startsWith('/api/ingest')) {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
+    return NextResponse.next();
+  }
+
+  // 3. API route protection
   if (pathname.startsWith('/api')) {
     const auth = verifyApiAuth(req);
     if (!auth.authorized) {
@@ -24,8 +35,8 @@ export function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // For non-API routes, check single-user token if SOFIA_API_TOKEN is set
-  const expectedToken = process.env.SOFIA_API_TOKEN || process.env.SOFIA_AUTH_TOKEN;
+  // 4. Page route protection
+  const expectedToken = process.env.SOFIA_AUTH_TOKEN || process.env.SOFIA_API_TOKEN;
   if (!expectedToken) {
     return NextResponse.next();
   }
@@ -38,7 +49,9 @@ export function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
-  return new NextResponse('Unauthorized: Sofia is single-user.', { status: 401 });
+  // Redirect unauthenticated browser users to /unlock
+  const unlockUrl = new URL('/unlock', req.url);
+  return NextResponse.redirect(unlockUrl);
 }
 
 export const config = {

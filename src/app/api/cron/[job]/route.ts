@@ -2,22 +2,34 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/db';
 import { executeProactiveJob } from '@/lib/proactive';
 
+const JOB_ALIASES: Record<string, string> = {
+  morning: 'wake_report',
+  midday: 'midday_check',
+  evening: 'daily_verdict',
+  night: 'daily_verdict',
+  evening_verdict: 'daily_verdict',
+};
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ job: string }> }
 ) {
   try {
-    const { job: requestedJob } = await params;
-    const job = requestedJob === 'evening_verdict' ? 'daily_verdict' : requestedJob;
+    const { job: rawJob } = await params;
+    const job = JOB_ALIASES[rawJob] || rawJob;
 
-    // Check Bearer token or CRON_SECRET if configured
-    const expectedToken = process.env.SOFIA_API_TOKEN || process.env.CRON_SECRET;
-    if (expectedToken) {
+    // Check CRON_SECRET or bearer token if configured
+    const expectedSecret =
+      process.env.CRON_SECRET ||
+      process.env.SOFIA_AUTH_TOKEN ||
+      process.env.SOFIA_API_TOKEN;
+
+    if (expectedSecret) {
       const authHeader = req.headers.get('authorization');
       const bearerToken = authHeader?.replace(/^Bearer\s+/i, '').trim();
       const cronSecret = req.headers.get('x-cron-secret');
 
-      if (bearerToken !== expectedToken && cronSecret !== expectedToken) {
+      if (bearerToken !== expectedSecret && cronSecret !== expectedSecret) {
         return NextResponse.json({ error: 'unauthorized_token' }, { status: 401 });
       }
     }
@@ -28,13 +40,39 @@ export async function POST(
     const validJobs = ['wake_report', 'midday_check', 'daily_verdict', 'github_sync'];
     if (!validJobs.includes(job)) {
       return NextResponse.json(
-        { error: `Invalid cron job: ${requestedJob}. Valid jobs: wake_report, midday_check, evening_verdict (daily_verdict), github_sync` },
+        {
+          error: `Invalid cron job: ${rawJob}. Valid jobs: morning (wake_report), midday (midday_check), evening/night (daily_verdict), github_sync`,
+        },
         { status: 400 }
       );
     }
 
     const db = getDatabase();
     const result = await executeProactiveJob(db, job, { force });
+
+    // Optional Telegram push if configured
+    if (
+      result.sent &&
+      result.text &&
+      process.env.TELEGRAM_BOT_TOKEN &&
+      process.env.TELEGRAM_CHAT_ID
+    ) {
+      try {
+        await fetch(
+          `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: process.env.TELEGRAM_CHAT_ID,
+              text: `🌸 Sofia: ${result.text}`,
+            }),
+          }
+        );
+      } catch (tgErr) {
+        console.warn('Failed to dispatch telegram notification:', tgErr);
+      }
+    }
 
     return NextResponse.json(result);
   } catch (err) {
