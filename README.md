@@ -8,6 +8,9 @@ Designed with a **dark aesthetic blurry, glassy burgundy vibe** and featuring **
 
 ## 🍷 Visual Aesthetic & Design
 
+- **Live Production URL**: [https://sofia.ctum.org](https://sofia.ctum.org)
+- **Deployment**: Coolify containerized standalone Next.js 16 runtime with automated git-push CD.
+
 - **Palette**: Deep wine and dark burgundy background (`#080205` to `#240715`), crimson glowing accents (`#e11d48`, `#f43f5e`), and soft rose highlights (`#fda4af`).
 - **Glassmorphism**: Layered `backdrop-blur-2xl` glass panels with delicate semi-translucent crimson borders and ambient radial neon glows.
 - **Sofia Character**:
