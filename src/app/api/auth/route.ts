@@ -5,14 +5,18 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const token = typeof body.token === 'string' ? body.token.trim() : '';
 
-    const expectedToken = process.env.SOFIA_AUTH_TOKEN || process.env.SOFIA_API_TOKEN;
+    const expectedToken = (process.env.SOFIA_AUTH_TOKEN || process.env.SOFIA_API_TOKEN || '').trim();
+
+    // Determine if request is truly HTTPS
+    const proto = req.headers.get('x-forwarded-proto') || req.nextUrl.protocol;
+    const isHttps = proto.startsWith('https');
 
     // If no token is configured in environment, allow open access
     if (!expectedToken) {
       const response = NextResponse.json({ ok: true, devMode: true });
       response.cookies.set('sofia_token', 'dev-token', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        httpOnly: false,
+        secure: isHttps,
         sameSite: 'lax',
         maxAge: 30 * 86400,
         path: '/',
@@ -21,10 +25,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (token === expectedToken) {
-      const response = NextResponse.json({ ok: true });
+      const response = NextResponse.json({ ok: true, token: expectedToken });
       response.cookies.set('sofia_token', expectedToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        httpOnly: false,
+        secure: isHttps,
         sameSite: 'lax',
         maxAge: 30 * 86400,
         path: '/',
@@ -39,14 +43,17 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const expectedToken = process.env.SOFIA_AUTH_TOKEN || process.env.SOFIA_API_TOKEN;
+  const expectedToken = (process.env.SOFIA_AUTH_TOKEN || process.env.SOFIA_API_TOKEN || '').trim();
   if (!expectedToken) {
     return NextResponse.json({ authenticated: true, devMode: true });
   }
 
   const cookieToken = req.cookies.get('sofia_token')?.value;
   const authHeader = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
+  const customHeader = req.headers.get('x-sofia-token');
 
-  const isAuth = cookieToken === expectedToken || authHeader === expectedToken;
+  const isAuth =
+    cookieToken === expectedToken || authHeader === expectedToken || customHeader === expectedToken;
+
   return NextResponse.json({ authenticated: isAuth });
 }

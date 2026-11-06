@@ -36,14 +36,15 @@ export function proxy(req: NextRequest) {
   }
 
   // 4. Page route protection
-  const expectedToken = process.env.SOFIA_AUTH_TOKEN || process.env.SOFIA_API_TOKEN;
+  const expectedToken = (process.env.SOFIA_AUTH_TOKEN || process.env.SOFIA_API_TOKEN || '').trim();
   if (!expectedToken) {
     return NextResponse.next();
   }
 
-  const authHeader = req.headers.get('authorization');
+  const authHeader = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
+  const customHeader = req.headers.get('x-sofia-token');
   const cookieToken = req.cookies.get('sofia_token')?.value;
-  const token = authHeader?.replace(/^Bearer\s+/i, '').trim() || cookieToken;
+  const token = authHeader || customHeader || cookieToken;
 
   if (token === expectedToken) {
     return NextResponse.next();

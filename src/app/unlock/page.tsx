@@ -38,10 +38,16 @@ export default function UnlockPage() {
       });
 
       if (res.ok) {
-        router.replace('/');
+        const trimmed = token.trim();
+        document.cookie = `sofia_token=${encodeURIComponent(trimmed)}; path=/; max-age=2592000; SameSite=Lax`;
+        try {
+          localStorage.setItem('sofia_token', trimmed);
+          localStorage.setItem('sofia_api_token', trimmed);
+        } catch {}
+        window.location.href = '/';
       } else {
         const data = await res.json().catch(() => ({}));
-        setError(data.error || 'Invalid bearer token');
+        setError(data.error || 'Invalid authentication token');
       }
     } catch {
       setError('Connection failure. Please retry.');
