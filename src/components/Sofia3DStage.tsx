@@ -142,7 +142,7 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
         <div className="relative flex items-center justify-center">
           {/* Ambient Glowing Backlight Halo (Pulses with vocal energy) */}
           <div 
-            className={`absolute -inset-4 sm:-inset-6 rounded-full blur-2xl transition-all duration-700 pointer-events-none ${
+            className={`absolute -inset-6 sm:-inset-8 rounded-full blur-2xl transition-all duration-700 pointer-events-none ${
               isSpeaking
                 ? 'bg-rose-500/28 scale-105 shadow-[0_0_120px_rgba(244,63,94,0.35)]'
                 : isListening
@@ -153,7 +153,7 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
 
           {/* Holographic Circular Portal Dais */}
           <div 
-            className={`w-[280px] h-[280px] sm:w-[340px] sm:h-[340px] lg:w-[380px] lg:h-[380px] rounded-full relative overflow-hidden flex items-center justify-center transition-all duration-500 backdrop-blur-2xl bg-gradient-to-b from-rose-950/15 via-transparent to-rose-950/25 ${
+            className={`w-[320px] h-[320px] sm:w-[400px] sm:h-[400px] lg:w-[460px] lg:h-[460px] rounded-full relative overflow-hidden flex items-center justify-center transition-all duration-500 backdrop-blur-2xl bg-gradient-to-b from-rose-950/15 via-transparent to-rose-950/25 ${
               isSpeaking
                 ? 'border border-rose-400/40 shadow-[0_0_90px_rgba(244,63,94,0.30),inset_0_0_50px_rgba(255,200,225,0.15)]'
                 : 'border border-rose-500/20 shadow-[0_0_70px_rgba(225,29,72,0.15),inset_0_0_40px_rgba(244,63,94,0.10)]'

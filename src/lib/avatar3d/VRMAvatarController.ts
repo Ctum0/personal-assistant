@@ -87,10 +87,12 @@ export class VRMAvatarController {
   // Speech cadence timer
   private speechTimer = 0;
 
-  // Ambient Glowing Ember Particles
+  // Ambient Glowing Ember Particles (Swirling Helical Vortex)
   private particles: THREE.Points | null = null;
   private particlePositions: Float32Array | null = null;
   private particleSeeds: Float32Array | null = null;
+  private particleAngles: Float32Array | null = null;
+  private particleRadii: Float32Array | null = null;
   private particleCount = 180;
   private particleMaterial: THREE.PointsMaterial | null = null;
 
@@ -125,6 +127,9 @@ export class VRMAvatarController {
 
           // VRM 0.0 models face -Z, rotate 180 to face +Z (towards camera)
           vrm.scene.rotation.y = Math.PI;
+
+          // Sinking model by -0.16m lowers head/fox-ears/cowlick safely into the center of the circular dais
+          vrm.scene.position.y = -0.16;
 
           // Enable shadow casting and ensure frustum culling doesn't clip hair
           vrm.scene.traverse((obj) => {
@@ -162,23 +167,32 @@ export class VRMAvatarController {
   }
 
   /**
-   * Initializes soft-glowing ethereal ember particles drifting around Sofia
+   * Initializes soft-glowing ethereal ember particles in an orbital double-helix vortex around Sofia
    */
   private initAmbientParticles(scene: THREE.Scene): void {
     const geo = new THREE.BufferGeometry();
     const pos = new Float32Array(this.particleCount * 3);
     const seeds = new Float32Array(this.particleCount);
+    const angles = new Float32Array(this.particleCount);
+    const radii = new Float32Array(this.particleCount);
 
     for (let i = 0; i < this.particleCount; i++) {
-      pos[i * 3 + 0] = (Math.random() - 0.5) * 2.2;
-      pos[i * 3 + 1] = 0.4 + Math.random() * 1.6;
-      pos[i * 3 + 2] = (Math.random() - 0.5) * 1.6;
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 0.35 + Math.random() * 0.55;
+      angles[i] = angle;
+      radii[i] = radius;
       seeds[i] = Math.random() * Math.PI * 2;
+
+      pos[i * 3 + 0] = Math.cos(angle) * radius;
+      pos[i * 3 + 1] = 0.20 + Math.random() * 1.45;
+      pos[i * 3 + 2] = Math.sin(angle) * radius;
     }
 
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     this.particlePositions = pos;
     this.particleSeeds = seeds;
+    this.particleAngles = angles;
+    this.particleRadii = radii;
 
     // Glowing ember circle texture
     const canvas = document.createElement('canvas');
@@ -202,7 +216,7 @@ export class VRMAvatarController {
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      opacity: 0.75,
+      opacity: 0.70,
     });
     this.particleMaterial = mat;
 
@@ -432,29 +446,36 @@ export class VRMAvatarController {
   }
 
   /**
-   * Updates ambient glowing particle field
+   * Updates ambient glowing particle vortex in a swirling double-helix around Sofia
    */
   private updateParticles(dt: number, elapsedTime: number): void {
-    if (!this.particles || !this.particlePositions || !this.particleSeeds) return;
+    if (!this.particles || !this.particlePositions || !this.particleSeeds || !this.particleAngles || !this.particleRadii) return;
 
     const pos = this.particlePositions;
     const seeds = this.particleSeeds;
-    const speedMult = this.isSpeaking ? 1.55 : 1.0;
+    const angles = this.particleAngles;
+    const radii = this.particleRadii;
+    const speedMult = this.isSpeaking ? 1.65 : 1.0;
 
     for (let i = 0; i < this.particleCount; i++) {
       const idx = i * 3;
       const seed = seeds[i];
 
+      // Swirling double-helix rotational movement
+      angles[i] += (0.42 + (seed % 0.35)) * speedMult * dt;
+      const currentRadius = radii[i] + Math.sin(elapsedTime * 0.9 + seed) * 0.045;
+
+      pos[idx + 0] = Math.cos(angles[i]) * currentRadius;
+      pos[idx + 2] = Math.sin(angles[i]) * currentRadius;
+
       // Drift upward with gentle sine flutter
-      pos[idx + 1] += (0.08 * speedMult + 0.03 * Math.sin(seed)) * dt;
-      pos[idx + 0] += Math.sin(elapsedTime * 0.7 + seed) * 0.0018;
-      pos[idx + 2] += Math.cos(elapsedTime * 0.5 + seed) * 0.0014;
+      pos[idx + 1] += (0.09 * speedMult + 0.03 * Math.cos(seed)) * dt;
 
       // Wrap around when rising past bust ceiling
-      if (pos[idx + 1] > 2.05) {
-        pos[idx + 1] = 0.45;
-        pos[idx + 0] = (Math.random() - 0.5) * 2.0;
-        pos[idx + 2] = (Math.random() - 0.5) * 1.4;
+      if (pos[idx + 1] > 1.68) {
+        pos[idx + 1] = 0.22;
+        angles[i] = Math.random() * Math.PI * 2;
+        radii[i] = 0.35 + Math.random() * 0.55;
       }
     }
 
@@ -462,7 +483,7 @@ export class VRMAvatarController {
 
     // Vocal shimmer resonance
     if (this.particleMaterial) {
-      const targetOpacity = this.isSpeaking ? 0.95 : 0.65;
+      const targetOpacity = this.isSpeaking ? 0.92 : 0.62;
       this.particleMaterial.opacity += (targetOpacity - this.particleMaterial.opacity) * (4.0 * dt);
     }
   }

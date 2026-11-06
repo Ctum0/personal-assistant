@@ -31,6 +31,12 @@ export default function Sofia3DCanvas({
   // Loading state
   const [loading, setLoading] = useState(true);
 
+  // Keep live speaking ref for animation loop
+  const isSpeakingRef = useRef(isSpeaking);
+  useEffect(() => {
+    isSpeakingRef.current = isSpeaking;
+  }, [isSpeaking]);
+
   // 1. Initialize Seamless Three.js Scene, Studio Lighting & VRM Controller
   useEffect(() => {
     if (!containerRef.current || !canvasRef.current) return;
@@ -43,11 +49,11 @@ export default function Sofia3DCanvas({
     sceneRef.current = scene;
 
     // Cinematic Bust-Up / Waist-Up Camera
-    // Focal length ~45mm (FOV 38°). Position: (0, 1.25, 1.38), lookAt: (0, 1.20, 0).
-    // Perfectly frames Sofia's head, eyes, glasses, hair, and conversational hand gestures in center of circular dais!
-    const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 50);
-    camera.position.set(0, 1.25, 1.38);
-    camera.lookAt(0, 1.20, 0);
+    // Focal length ~45mm (FOV 36°). Position: (0, 1.16, 1.88), lookAt: (0, 1.08, 0).
+    // Provides generous vertical headroom (>30cm) so Sofia's hair, fox ears, and cowlick never clip at the top of the circle!
+    const camera = new THREE.PerspectiveCamera(36, width / height, 0.1, 50);
+    camera.position.set(0, 1.16, 1.88);
+    camera.lookAt(0, 1.08, 0);
     cameraRef.current = camera;
 
     // 100% Transparent WebGL Renderer with ACES Filmic Tone Mapping
@@ -63,32 +69,75 @@ export default function Sofia3DCanvas({
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.18;
+    renderer.toneMappingExposure = 0.82; // Mysterious, eye-friendly, velvet cinematic tone
     rendererRef.current = renderer;
 
-    // Luxury Studio Lighting Setup
-    // Warm Key Light (Directional, upper-right, soft warm ivory)
-    const keyLight = new THREE.DirectionalLight(0xfff5ea, 2.6);
-    keyLight.position.set(1.2, 2.2, 1.6);
+    // Mysterious, Eye-Friendly Luxury Studio Lighting Setup
+    // Soft Warm Ivory Key Light (calibrated intensity preserves facial details, eye gradients, and cheek blush)
+    const keyLight = new THREE.DirectionalLight(0xfff0ea, 0.95);
+    keyLight.position.set(1.0, 2.0, 1.5);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.width = 1024;
     keyLight.shadow.mapSize.height = 1024;
     keyLight.shadow.bias = -0.0004;
     scene.add(keyLight);
 
-    // Rose-Gold Rim Light (Back-left hair & silhouette illumination)
-    const rimLight = new THREE.DirectionalLight(0xffcad4, 3.2);
-    rimLight.position.set(-1.4, 2.0, -1.4);
+    // Moody Crimson-Rose Silhouette Rim Light (highlights hair silhouette without washing out face)
+    const rimLight = new THREE.DirectionalLight(0xe11d48, 1.25);
+    rimLight.position.set(-1.3, 1.8, -1.3);
     scene.add(rimLight);
 
-    // Deep Nocturnal Burgundy Ambient Fill (Front-left)
-    const fillLight = new THREE.DirectionalLight(0xf43f5e, 0.75);
-    fillLight.position.set(-1.0, 1.1, 1.2);
+    // Deep Nocturnal Wine Fill Light (soft shadow illumination)
+    const fillLight = new THREE.DirectionalLight(0x881337, 0.35);
+    fillLight.position.set(-0.8, 1.0, 1.2);
     scene.add(fillLight);
 
-    // Soft Overhead Sky Warmth
-    const hemiLight = new THREE.HemisphereLight(0xffe4e6, 0x18030f, 0.95);
+    // Subtle Overhead Sky Warmth & Velvet Shadow Base
+    const hemiLight = new THREE.HemisphereLight(0xfecdd3, 0x050103, 0.35);
     scene.add(hemiLight);
+
+    // 3. Ethereal Arcane Holographic Resonance Rings (Inside Circle Animation)
+    const ringGroup = new THREE.Group();
+    ringGroup.position.set(0, 0.82, 0); // Positioned at waist/torso level
+
+    // Ring 1: Primary Outer Ethereal Ring (crimson-rose glow)
+    const ring1Geo = new THREE.TorusGeometry(0.58, 0.0035, 16, 96);
+    const ring1Mat = new THREE.MeshBasicMaterial({
+      color: 0xf43f5e,
+      transparent: true,
+      opacity: 0.42,
+      blending: THREE.AdditiveBlending,
+    });
+    const ring1 = new THREE.Mesh(ring1Geo, ring1Mat);
+    ring1.rotation.x = Math.PI * 0.42;
+    ringGroup.add(ring1);
+
+    // Ring 2: Inner Delicate Counter-Rotating Ring (soft rose-gold warmth)
+    const ring2Geo = new THREE.TorusGeometry(0.46, 0.0025, 16, 80);
+    const ring2Mat = new THREE.MeshBasicMaterial({
+      color: 0xffcad4,
+      transparent: true,
+      opacity: 0.32,
+      blending: THREE.AdditiveBlending,
+    });
+    const ring2 = new THREE.Mesh(ring2Geo, ring2Mat);
+    ring2.rotation.x = -Math.PI * 0.38;
+    ringGroup.add(ring2);
+
+    // Ring 3: Tilted Orbital Ellipse (celestial aura)
+    const ring3Geo = new THREE.TorusGeometry(0.70, 0.002, 16, 96);
+    const ring3Mat = new THREE.MeshBasicMaterial({
+      color: 0xbe123c,
+      transparent: true,
+      opacity: 0.22,
+      blending: THREE.AdditiveBlending,
+    });
+    const ring3 = new THREE.Mesh(ring3Geo, ring3Mat);
+    ring3.rotation.x = Math.PI * 0.18;
+    ring3.rotation.y = Math.PI * 0.25;
+    ringGroup.add(ring3);
+
+    scene.add(ringGroup);
 
     // Load High-Fidelity VRM Digital Human
     const vrmController = new VRMAvatarController();
@@ -125,6 +174,18 @@ export default function Sofia3DCanvas({
       animationFrameId = requestAnimationFrame(animate);
       const delta = clock.getDelta();
 
+      // Animate Holographic Arcane Resonance Rings
+      ring1.rotation.z += delta * 0.22;
+      ring2.rotation.z -= delta * 0.32;
+      ring3.rotation.y += delta * 0.15;
+      ring3.rotation.x = Math.PI * 0.18 + Math.sin(clock.getElapsedTime() * 0.7) * 0.06;
+
+      // Vocal resonance pulsation on holographic rings
+      const isSpeakingNow = isSpeakingRef.current;
+      const targetRingOpacity = isSpeakingNow ? 0.75 : 0.40;
+      ring1Mat.opacity += (targetRingOpacity - ring1Mat.opacity) * 0.08;
+      ring2Mat.opacity += (targetRingOpacity * 0.8 - ring2Mat.opacity) * 0.08;
+
       // Update Autonomous VRM (breathing, gestures, slerp, micro-shifts, particles)
       vrmController.update(delta);
 
@@ -136,6 +197,12 @@ export default function Sofia3DCanvas({
     return () => {
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(animationFrameId);
+      ring1Geo.dispose();
+      ring1Mat.dispose();
+      ring2Geo.dispose();
+      ring2Mat.dispose();
+      ring3Geo.dispose();
+      ring3Mat.dispose();
       renderer.dispose();
     };
   }, []);

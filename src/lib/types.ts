@@ -136,10 +136,10 @@ export const defaultSettings: SofiaSettings = {
     verbosity: 3,
   },
   hermes: {
-    base_url: 'http://127.0.0.1:8642/v1',
-    api_key: 'hermes-sofia-api',
-    model: 'hermes-agent',
-    provider: 'copilot',
+    base_url: 'https://ai-proxy.zenova.services/v1',
+    api_key: '',
+    model: 'deepseek-v4.1-flash',
+    provider: 'litellm',
     computer_use_enabled: true,
   },
   voice: {
