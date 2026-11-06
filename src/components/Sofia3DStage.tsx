@@ -111,6 +111,26 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
 
   return (
     <div className="relative w-full h-screen max-h-screen flex flex-col justify-between items-center overflow-hidden select-none bg-[#070105] bg-[radial-gradient(circle_at_50%_38%,rgba(45,8,28,0.7)_0%,rgba(20,4,14,0.85)_45%,rgba(7,1,5,1.0)_80%)]">
+      {/* 0. Ambient Cosmic Nebula Waves & Twinkling Star Dust (Outside Circle Animations) */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden z-0" aria-hidden="true">
+        {/* Nebula Cloud 1: Deep Nocturnal Wine/Crimson Aurora */}
+        <div className="absolute top-[12%] left-[16%] w-[680px] h-[680px] rounded-full bg-[radial-gradient(circle,rgba(110,12,48,0.36)_0%,rgba(65,6,30,0.18)_45%,transparent_70%)] blur-[95px] animate-nebula-1" />
+        
+        {/* Nebula Cloud 2: Velvet Obsidian / Cosmic Indigo Aurora */}
+        <div className="absolute bottom-[10%] right-[14%] w-[720px] h-[720px] rounded-full bg-[radial-gradient(circle,rgba(50,8,60,0.30)_0%,rgba(28,4,36,0.16)_50%,transparent_70%)] blur-[100px] animate-nebula-2" />
+        
+        {/* Nebula Cloud 3: Warm Rose-Gold Core Glow behind Stage */}
+        <div className="absolute top-[34%] left-[50%] -translate-x-1/2 -translate-y-1/2 w-[540px] h-[540px] rounded-full bg-[radial-gradient(circle,rgba(225,29,72,0.16)_0%,rgba(159,18,57,0.06)_50%,transparent_75%)] blur-[75px] animate-pulse-slow" />
+
+        {/* Twinkling Starlet Dust Field */}
+        <div className="absolute top-[16%] left-[22%] w-1.5 h-1.5 rounded-full bg-rose-200/60 shadow-[0_0_8px_rgba(255,200,225,0.8)] animate-star-1" />
+        <div className="absolute top-[26%] right-[24%] w-1 h-1 rounded-full bg-rose-300/50 shadow-[0_0_6px_rgba(255,200,225,0.7)] animate-star-2" />
+        <div className="absolute bottom-[24%] left-[26%] w-1.5 h-1.5 rounded-full bg-rose-100/70 shadow-[0_0_10px_rgba(255,220,240,0.9)] animate-star-3" />
+        <div className="absolute top-[48%] left-[10%] w-1 h-1 rounded-full bg-pink-300/40 shadow-[0_0_6px_rgba(244,63,94,0.6)] animate-star-2" />
+        <div className="absolute top-[50%] right-[12%] w-1.5 h-1.5 rounded-full bg-rose-200/50 shadow-[0_0_8px_rgba(255,200,225,0.7)] animate-star-1" />
+        <div className="absolute bottom-[34%] right-[20%] w-1 h-1 rounded-full bg-rose-400/40 shadow-[0_0_6px_rgba(244,63,94,0.5)] animate-star-3" />
+      </div>
+
       {/* 1. Top Minimal Luxury Header */}
       <div role="region" aria-label="Console Navigation Header" className="relative z-20 w-full flex items-center justify-between px-6 py-3.5 shrink-0">
         <div className="flex items-center space-x-3">
@@ -140,6 +160,13 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
       {/* 2. Center Stage: Circular Holographic Dais / Ethereal Glass Portal */}
       <section aria-label="Sofia Companion Dais" className="relative z-10 flex-1 flex flex-col items-center justify-center w-full px-4 min-h-0 py-1">
         <div className="relative flex items-center justify-center">
+          {/* Expanding Holographic Acoustic Resonance Waves (Outside Circle Animation) */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none" aria-hidden="true">
+            <div className={`w-[360px] h-[360px] sm:w-[440px] sm:h-[440px] md:w-[480px] md:h-[480px] lg:w-[520px] lg:h-[520px] xl:w-[540px] xl:h-[540px] rounded-full border ${isSpeaking ? 'border-rose-400/35' : 'border-rose-600/15'} animate-acoustic-1`} />
+            <div className={`w-[360px] h-[360px] sm:w-[440px] sm:h-[440px] md:w-[480px] md:h-[480px] lg:w-[520px] lg:h-[520px] xl:w-[540px] xl:h-[540px] rounded-full border ${isSpeaking ? 'border-rose-400/25' : 'border-rose-700/10'} animate-acoustic-2`} />
+            <div className={`w-[360px] h-[360px] sm:w-[440px] sm:h-[440px] md:w-[480px] md:h-[480px] lg:w-[520px] lg:h-[520px] xl:w-[540px] xl:h-[540px] rounded-full border ${isSpeaking ? 'border-rose-400/20' : 'border-rose-800/10'} animate-acoustic-3`} />
+          </div>
+
           {/* Ambient Glowing Backlight Halo (Pulses with vocal energy) */}
           <div 
             className={`absolute -inset-6 sm:-inset-8 rounded-full blur-2xl transition-all duration-700 pointer-events-none ${
@@ -153,14 +180,20 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
 
           {/* Holographic Circular Portal Dais */}
           <div 
-            className={`w-[320px] h-[320px] sm:w-[400px] sm:h-[400px] lg:w-[460px] lg:h-[460px] rounded-full relative overflow-hidden flex items-center justify-center transition-all duration-500 backdrop-blur-2xl bg-gradient-to-b from-rose-950/15 via-transparent to-rose-950/25 ${
+            className={`w-[360px] h-[360px] sm:w-[440px] sm:h-[440px] md:w-[480px] md:h-[480px] lg:w-[520px] lg:h-[520px] xl:w-[540px] xl:h-[540px] rounded-full relative overflow-hidden flex items-center justify-center transition-all duration-500 backdrop-blur-2xl bg-gradient-to-b from-rose-950/20 via-[#070105]/85 to-rose-950/30 ${
               isSpeaking
-                ? 'border border-rose-400/40 shadow-[0_0_90px_rgba(244,63,94,0.30),inset_0_0_50px_rgba(255,200,225,0.15)]'
-                : 'border border-rose-500/20 shadow-[0_0_70px_rgba(225,29,72,0.15),inset_0_0_40px_rgba(244,63,94,0.10)]'
+                ? 'border border-rose-400/40 shadow-[0_0_100px_rgba(244,63,94,0.35),inset_0_0_60px_rgba(244,63,94,0.18)]'
+                : 'border border-rose-500/25 shadow-[0_0_80px_rgba(225,29,72,0.18),inset_0_0_45px_rgba(244,63,94,0.12)]'
             }`}
           >
+            {/* Deep Velvet Internal Vignette (Preserves delicate facial contrast & mysterious aesthetic) */}
+            <div className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(circle_at_50%_46%,rgba(28,4,18,0.15)_0%,rgba(14,2,9,0.72)_72%,rgba(5,1,4,0.96)_100%)] z-0" />
+
+            {/* Rotating Chromatic Edge Refraction Sheen (Inside Circle Animation) */}
+            <div className="pointer-events-none absolute -inset-[15%] rounded-full opacity-35 animate-dais-spin bg-[conic-gradient(from_0deg,transparent_0deg,rgba(244,63,94,0.22)_90deg,transparent_180deg,rgba(255,200,225,0.18)_270deg,transparent_360deg)] z-0" />
+
             {/* 3D VRM Canvas (Camera focused at bust-up/waist-up elevation; zero detached legs!) */}
-            <div className="w-full h-full relative">
+            <div className="w-full h-full relative z-10">
               <Sofia3DCanvas
                 expression={expression}
                 isSpeaking={isSpeaking}
@@ -170,7 +203,7 @@ export const Sofia3DStage: React.FC<Sofia3DStageProps> = ({
             </div>
 
             {/* Subtle Ethereal Glass Glare Highlight */}
-            <div className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-tr from-transparent via-white/[0.04] to-transparent" />
+            <div className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-tr from-transparent via-white/[0.03] to-transparent z-20" />
           </div>
         </div>
       </section>
