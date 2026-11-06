@@ -640,6 +640,79 @@ export default function SettingsPage() {
               className="w-5 h-5 rounded bg-rose-950 border-rose-500/40 text-rose-600 focus:ring-rose-500 cursor-pointer"
             />
           </div>
+
+          {/* Gemini 3.8 Live Settings (Spec Phase F & A) */}
+          <div className="pt-4 border-t border-rose-900/40 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-bold font-mono text-rose-200 flex items-center space-x-2">
+                <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse" />
+                <span>Gemini 3.8 Live Real-Time Configuration</span>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-950/80 text-rose-300 border border-rose-800/40">
+                gemini-3.8-live
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-mono">
+              <div className="space-y-1.5">
+                <label className="text-rose-200 font-medium">Live Voice Candidate</label>
+                <select
+                  value={settings.voice?.elevenlabs_voice_id === 'Leda' ? 'Leda' : settings.voice?.elevenlabs_voice_id === 'Achernar' ? 'Achernar' : 'Aoede'}
+                  onChange={(e) => {
+                    const chosen = e.target.value;
+                    if (typeof window !== 'undefined') {
+                      localStorage.setItem('sofia_active_voice', chosen);
+                    }
+                  }}
+                  className="w-full glass-input px-3 py-2 rounded-xl text-xs font-mono min-h-[44px] bg-[#1a040e]"
+                >
+                  <option value="Aoede">Aoede (Breezy — Companion PA default)</option>
+                  <option value="Leda">Leda (Youthful — Bright timbre)</option>
+                  <option value="Achernar">Achernar (Soft — Gentle tone)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-rose-200 font-medium">Response Modality</label>
+                <select
+                  defaultValue="AUDIO"
+                  className="w-full glass-input px-3 py-2 rounded-xl text-xs font-mono min-h-[44px] bg-[#1a040e]"
+                >
+                  <option value="AUDIO">AUDIO (Native 24kHz bidirectional live)</option>
+                  <option value="TEXT">TEXT (Half-cascade text + Edge TTS fallback)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-rose-200 font-medium">VAD Silence Floor</label>
+                <select
+                  defaultValue="500"
+                  className="w-full glass-input px-3 py-2 rounded-xl text-xs font-mono min-h-[44px] bg-[#1a040e]"
+                >
+                  <option value="400">400 ms (Fastest yield)</option>
+                  <option value="500">500 ms (Recommended default)</option>
+                  <option value="750">750 ms (Thoughtful pauses)</option>
+                  <option value="1000">1000 ms (Noisy room filter)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Daily Live Usage Meter */}
+            <div className="p-3.5 rounded-xl bg-black/40 border border-burgundy-800/40 space-y-2">
+              <div className="flex justify-between items-center text-xs font-mono">
+                <span className="text-rose-300">Daily Live Usage Meter</span>
+                <span className="text-rose-200 font-bold">Free Tier (Soft: 60m / Hard: 120m)</span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-rose-950 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-emerald-500 via-rose-500 to-red-500 w-[12%]" />
+              </div>
+              <div className="flex justify-between items-center text-[10px] font-mono text-rose-400/80">
+                <span>0 min</span>
+                <span>60 min (Soft alert)</span>
+                <span>120 min (Hard stop)</span>
+              </div>
+            </div>
+          </div>
         </section>
       </div>
     </form>

@@ -4,11 +4,16 @@ import React, { useState, useEffect } from 'react';
 import { SofiaExpression } from '@/lib/types';
 import { EXPRESSION_IMAGES } from '@/lib/expressions';
 
+export type LiveState = 'off' | 'connecting' | 'listening' | 'speaking' | 'thinking' | 'error';
+
 interface SofiaAvatarProps {
   expression?: SofiaExpression;
   isSpeaking?: boolean;
   score?: number;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  mouthOpen?: number;
+  liveState?: LiveState;
+  micLevel?: number;
   className?: string;
   onClick?: () => void;
 }
@@ -18,6 +23,9 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
   isSpeaking = false,
   score = 75,
   size = 'lg',
+  mouthOpen = 0,
+  liveState = 'off',
+  micLevel = 0,
   className = '',
   onClick,
 }) => {
@@ -46,6 +54,15 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
   }[size];
 
   const getGlowGradient = () => {
+    if (liveState === 'connecting') {
+      return 'from-amber-600/40 via-amber-950/40 to-transparent';
+    }
+    if (liveState === 'error') {
+      return 'from-red-600/50 via-red-950/50 to-transparent';
+    }
+    if (liveState === 'listening') {
+      return 'from-rose-500/35 via-burgundy-900/30 to-transparent';
+    }
     if (currentExp === 'stern' || score < 50) {
       return 'from-rose-600/35 via-red-950/40 to-transparent';
     }
@@ -62,6 +79,14 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
     return EXPRESSION_IMAGES[exp] || '/sofia/expressions/neutral.png';
   };
 
+  // Compute mouth open scale (height between 2px and 14px)
+  const effectiveMouthOpen = Math.max(0, Math.min(1, mouthOpen));
+  const mouthHeightPx = isSpeaking ? Math.max(3, effectiveMouthOpen * 14) : 0;
+  const mouthWidthPx = isSpeaking ? Math.max(12, 12 + effectiveMouthOpen * 8) : 0;
+
+  // Compute microphone ring scale when listening
+  const micScale = 1 + Math.min(0.35, micLevel * 0.8);
+
   return (
     <div
       onClick={onClick}
@@ -77,19 +102,36 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
             }
           : undefined
       }
-      aria-label={onClick ? `${currentExp.toUpperCase()} - Sofia avatar. Click to interact.` : `${currentExp.toUpperCase()} - Sofia avatar`}
-      className={`relative flex items-center justify-center select-none group ${onClick ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 rounded-full' : ''} ${className}`}
+      aria-label={
+        onClick
+          ? `${currentExp.toUpperCase()} - Sofia avatar (${liveState}). Click to interact.`
+          : `${currentExp.toUpperCase()} - Sofia avatar`
+      }
+      className={`relative flex items-center justify-center select-none group ${
+        onClick
+          ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 rounded-full'
+          : ''
+      } ${className}`}
     >
-      {/* Ambient Pulsating Blurry Aura behind avatar */}
+      {/* Ambient Pulsating Aura behind avatar */}
       <div
-        className={`absolute inset-0 rounded-full bg-gradient-to-tr ${getGlowGradient()} blur-2xl animate-pulse-slow pointer-events-none scale-125`}
+        className={`absolute inset-0 rounded-full bg-gradient-to-tr ${getGlowGradient()} blur-2xl pointer-events-none scale-125 transition-all duration-500 ${
+          liveState === 'connecting' ? 'animate-pulse' : 'animate-pulse-slow'
+        }`}
       />
 
-      {/* Jarvis Subtle Frequency Orbit Rings */}
+      {/* Jarvis Frequency Orbit Rings */}
       <div className={`absolute ${sizeClasses} scale-110 pointer-events-none flex items-center justify-center`}>
         <div
-          className={`absolute inset-0 rounded-full border border-dashed border-rose-500/20 animate-spin-slow ${
-            isSpeaking ? 'border-rose-400/50 shadow-[0_0_25px_rgba(244,63,94,0.3)] animate-jarvis-pulse' : ''
+          style={{ transform: liveState === 'listening' ? `scale(${micScale})` : undefined }}
+          className={`absolute inset-0 rounded-full border border-dashed border-rose-500/20 transition-transform duration-100 ${
+            liveState === 'connecting'
+              ? 'border-amber-400/50 shadow-[0_0_20px_rgba(245,158,11,0.3)] animate-pulse'
+              : liveState === 'listening'
+              ? 'border-rose-400/40 shadow-[0_0_20px_rgba(244,63,94,0.3)]'
+              : isSpeaking
+              ? 'border-rose-400/50 shadow-[0_0_25px_rgba(244,63,94,0.3)] animate-jarvis-pulse'
+              : 'animate-spin-slow'
           }`}
         />
         <div className="absolute inset-3 rounded-full border border-rose-400/10 animate-spin-reverse-slow" />
@@ -98,7 +140,7 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
         )}
       </div>
 
-      {/* PNGTuber Avatar Container with 3.8s Idle Breathing Bob */}
+      {/* PNGTuber Avatar Container with Idle Breathing Bob */}
       <div
         className={`relative ${sizeClasses} flex items-center justify-center overflow-visible animate-sofia-bob`}
       >
@@ -109,13 +151,12 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
             alt={`Sofia ${prevExp}`}
             className="absolute inset-0 w-full h-full object-contain pointer-events-none drop-shadow-[0_12px_24px_rgba(0,0,0,0.6)] transition-opacity duration-180 opacity-0"
             onError={(e) => {
-              // Graceful fallback to neutral
               (e.target as HTMLImageElement).src = '/sofia/expressions/neutral.png';
             }}
           />
         )}
 
-        {/* Current expression image with 180ms crossfade */}
+        {/* Current expression image */}
         <img
           src={getSrc(currentExp)}
           alt={`Sofia ${currentExp}`}
@@ -131,7 +172,11 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
         {isSpeaking && (
           <div
             aria-hidden="true"
-            className="absolute bottom-[36%] left-[48%] w-5 h-2.5 bg-rose-950/80 rounded-full border border-rose-400/50 animate-mouth shadow-[0_0_8px_rgba(244,63,94,0.4)] pointer-events-none"
+            style={{
+              height: `${mouthHeightPx}px`,
+              width: `${mouthWidthPx}px`,
+            }}
+            className="absolute bottom-[36.5%] left-[48.5%] -translate-x-1/2 bg-rose-950/90 rounded-full border border-rose-400/60 shadow-[0_0_8px_rgba(244,63,94,0.5)] pointer-events-none transition-all duration-75 ease-out"
           />
         )}
 
@@ -139,11 +184,33 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
         <div className="absolute -bottom-2 w-4/5 h-[1px] bg-gradient-to-r from-transparent via-rose-500/40 to-transparent pointer-events-none" />
       </div>
 
-      {/* Status chip if speaking */}
-      {isSpeaking && (
-        <div className="absolute -bottom-6 flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-950/80 border border-rose-500/40 backdrop-blur-md animate-fade-in">
-          <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
-          <span className="text-[10px] uppercase font-mono tracking-widest text-rose-200">speaking</span>
+      {/* Status chip if live active */}
+      {liveState !== 'off' && (
+        <div className="absolute -bottom-6 flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-rose-950/80 border border-rose-500/40 backdrop-blur-md animate-fade-in">
+          <span
+            className={`w-1.5 h-1.5 rounded-full animate-pulse ${
+              liveState === 'connecting'
+                ? 'bg-amber-400'
+                : liveState === 'listening'
+                ? 'bg-rose-300'
+                : liveState === 'speaking'
+                ? 'bg-rose-400'
+                : liveState === 'thinking'
+                ? 'bg-fuchsia-400'
+                : 'bg-red-400'
+            }`}
+          />
+          <span className="text-[10px] uppercase font-mono tracking-widest text-rose-200">
+            {liveState === 'connecting'
+              ? 'connecting'
+              : liveState === 'listening'
+              ? 'listening'
+              : liveState === 'speaking'
+              ? 'speaking'
+              : liveState === 'thinking'
+              ? 'thinking'
+              : 'error'}
+          </span>
         </div>
       )}
     </div>

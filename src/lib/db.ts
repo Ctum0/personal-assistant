@@ -166,6 +166,13 @@ function initDatabase(db: DatabaseSync) {
       channel TEXT NOT NULL,
       suppressed_reason TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS live_usage (
+      id TEXT PRIMARY KEY,
+      date TEXT NOT NULL,
+      seconds REAL NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Migration guards for columns added in v2
@@ -625,3 +632,18 @@ export function getHistoryScores(db: DatabaseSync, limit: number = 14) {
     status: r.status,
   })).reverse();
 }
+
+export function trackLiveUsage(db: DatabaseSync, seconds: number) {
+  const date = new Date().toISOString().slice(0, 10);
+  const id = `live-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  db.prepare('INSERT INTO live_usage (id, date, seconds) VALUES (?, ?, ?)').run(id, date, seconds);
+}
+
+export function getTodayLiveSeconds(db: DatabaseSync): number {
+  const date = new Date().toISOString().slice(0, 10);
+  const row = db.prepare('SELECT SUM(seconds) as total FROM live_usage WHERE date = ?').get(date) as
+    | { total?: number }
+    | undefined;
+  return row?.total ?? 0;
+}
+

@@ -1,16 +1,18 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { Stage } from '@/components/Stage';
-import { Pane, SofiaTurn } from '@/lib/stage';
+import { LiveState } from '@/components/SofiaAvatar';
+import { LiveDebugOverlay, DebugMetrics } from '@/components/LiveDebugOverlay';
+import { Pane } from '@/lib/stage';
 import { SofiaExpression } from '@/lib/types';
 import { getExpressionFromMood } from '@/lib/expressions';
 import { speakSofia, stopSpeaking, unlockAudio } from '@/lib/voice';
-import { useVoiceInput } from '@/hooks/useVoiceInput';
+import { SofiaLiveSession, LiveConnState } from '@/lib/live/session';
 import {
   Mic,
-  MicOff,
+  PhoneOff,
   Send,
   Moon,
   Volume2,
@@ -24,16 +26,21 @@ import {
   Settings,
   Sparkles,
   Bot,
-  Zap,
+  Activity,
+  Headphones,
 } from 'lucide-react';
 
 export default function SofiaStageHome() {
   const [expression, setExpression] = useState<SofiaExpression>('focused');
   const [moodLabel, setMoodLabel] = useState('Focused');
   const [captionText, setCaptionText] = useState(
-    "I am Sofia. I am watching your stats, your focus blocks, and your output. What are we getting done today?"
+    'I am Sofia. What are we getting done today?'
   );
+  const [userCaption, setUserCaption] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [liveState, setLiveState] = useState<LiveState>('off');
+  const [mouthOpen, setMouthOpen] = useState(0);
+  const [micLevel, setMicLevel] = useState(0);
   const [score, setScore] = useState(85);
   const [panes, setPanes] = useState<Pane[]>([]);
   const [inputText, setInputText] = useState('');
@@ -43,9 +50,36 @@ export default function SofiaStageHome() {
   const [isRestDay, setIsRestDay] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
 
+  // Debug metrics
+  const [debugMetrics, setDebugMetrics] = useState<DebugMetrics>({
+    ttfa: null,
+    ttft: null,
+    connectionDuration: 0,
+    sessionDuration: 0,
+    reconnectCount: 0,
+    dropCount: 0,
+    model: 'gemini-3.8-live',
+    voice: 'Aoede',
+    state: 'off',
+    micRms: 0,
+  });
+
+  const liveSessionRef = useRef<SofiaLiveSession | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const usageTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Check ?debug=1 in URL
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('debug') === '1') {
+        setShowDebug(true);
+      }
+    }
+  }, []);
 
   // Clock ticker
   useEffect(() => {
@@ -60,7 +94,7 @@ export default function SofiaStageHome() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch initial status and settings
+  // Fetch initial status and score
   useEffect(() => {
     const loadInitialState = async () => {
       try {
@@ -101,14 +135,133 @@ export default function SofiaStageHome() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Report live usage to SQLite every 30 seconds while connected
+  useEffect(() => {
+    if (liveState !== 'off') {
+      usageTimerRef.current = setInterval(() => {
+        fetch('/api/live/usage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ seconds: 30 }),
+        }).catch(() => {});
+      }, 30000);
+    } else {
+      if (usageTimerRef.current) {
+        clearInterval(usageTimerRef.current);
+        usageTimerRef.current = null;
+      }
+    }
+
+    return () => {
+      if (usageTimerRef.current) {
+        clearInterval(usageTimerRef.current);
+      }
+    };
+  }, [liveState]);
+
+  // Handle Talk / Hang up Toggle
+  const toggleLiveVoice = useCallback(async () => {
+    unlockAudio();
+
+    if (liveSessionRef.current) {
+      // Hang up
+      liveSessionRef.current.stop();
+      liveSessionRef.current = null;
+      setLiveState('off');
+      setIsSpeaking(false);
+      setMouthOpen(0);
+      setMicLevel(0);
+      return;
+    }
+
+    // Start Live Session
+    setLiveState('connecting');
+    const session = new SofiaLiveSession({
+      onStateChange: (st: LiveConnState) => {
+        if (st === 'off' || st === 'closing') {
+          setLiveState('off');
+          setIsSpeaking(false);
+        } else if (
+          st === 'minting' ||
+          st === 'connecting' ||
+          st === 'reconnecting' ||
+          st === 'migrating'
+        ) {
+          setLiveState('connecting');
+        } else if (st === 'speaking') {
+          setLiveState('speaking');
+          setIsSpeaking(true);
+        } else if (st === 'listening' || st === 'live') {
+          setLiveState('listening');
+          setIsSpeaking(false);
+        } else if (st === 'failed') {
+          setLiveState('error');
+          setIsSpeaking(false);
+        }
+
+        setDebugMetrics((prev) => ({ ...prev, state: st }));
+      },
+      onCaption: (u, m) => {
+        if (u) setUserCaption(u);
+        if (m) setCaptionText(m);
+      },
+      onMouthOpen: (openRatio) => {
+        setMouthOpen(openRatio);
+      },
+      onPane: (pane) => {
+        setPanes((prev) => {
+          const pinned = prev.filter((p) => p.pinned);
+          const withoutExisting = prev.filter((p) => p.id !== pane.id);
+          return [...withoutExisting, pane];
+        });
+      },
+      onMood: (mood) => {
+        setMoodLabel(mood.charAt(0).toUpperCase() + mood.slice(1));
+        setExpression(getExpressionFromMood(mood));
+      },
+      onMetrics: (m) => {
+        setDebugMetrics((prev) => ({
+          ...prev,
+          ttfa: m.ttfa,
+          ttft: m.ttft,
+          connectionDuration: m.connDurationSec,
+          sessionDuration: m.sessionDurationSec,
+          reconnectCount: m.reconnects,
+          dropCount: m.drops,
+          voice: m.voice,
+          model: m.model,
+        }));
+      },
+      onError: (err) => {
+        console.warn('Live session error:', err);
+        setCaptionText(
+          'Mic or connection issue — check browser permissions or try again.'
+        );
+        setLiveState('error');
+      },
+    });
+
+    liveSessionRef.current = session;
+    await session.start();
+  }, []);
+
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend || inputText).trim();
     if (!text || isSending) return;
 
     setInputText('');
     setShowSuggestions(false);
-    setIsSending(true);
+    setUserCaption(text);
     unlockAudio();
+
+    // If live session is currently connected, forward text directly to Gemini Live
+    if (liveSessionRef.current && liveState !== 'off') {
+      liveSessionRef.current.sendTextMessage(text);
+      return;
+    }
+
+    // Otherwise use standard text API route
+    setIsSending(true);
 
     try {
       const res = await fetch('/api/chat', {
@@ -122,8 +275,6 @@ export default function SofiaStageHome() {
       }
 
       const data = await res.json();
-
-      // Support structured SofiaTurn { say, mood, panes } or standard text
       let turnSay = '';
       let turnMood = 'neutral';
       let turnPanes: Pane[] = [];
@@ -132,12 +283,9 @@ export default function SofiaStageHome() {
         if (data.say) {
           turnSay = data.say;
           turnMood = data.mood || 'neutral';
-          if (Array.isArray(data.panes)) {
-            turnPanes = data.panes;
-          }
+          if (Array.isArray(data.panes)) turnPanes = data.panes;
         } else if (data.reply || data.response || data.content) {
           const raw = data.reply || data.response || data.content;
-          // Attempt JSON parse in case raw string is encoded JSON
           try {
             const parsed = JSON.parse(raw);
             if (parsed.say) {
@@ -154,20 +302,15 @@ export default function SofiaStageHome() {
         }
       }
 
-      if (!turnSay) {
-        turnSay = "I've processed your update.";
-      }
+      if (!turnSay) turnSay = "I've processed your update.";
 
-      // Update Sofia avatar and caption
       const newExpression = getExpressionFromMood(turnMood);
       setExpression(newExpression);
       setMoodLabel(turnMood.charAt(0).toUpperCase() + turnMood.slice(1));
       setCaptionText(turnSay);
 
-      // Mount or merge new panes
       if (turnPanes && turnPanes.length > 0) {
         setPanes((prev) => {
-          // Keep existing pinned panes and append new ones
           const pinned = prev.filter((p) => p.pinned);
           const newUnpinned = turnPanes.filter(
             (np) => !pinned.some((p) => p.id === np.id)
@@ -176,7 +319,6 @@ export default function SofiaStageHome() {
         });
       }
 
-      // Auto-speak response if not muted
       if (!isMuted) {
         setIsSpeaking(true);
         await speakSofia(turnSay, {
@@ -194,21 +336,7 @@ export default function SofiaStageHome() {
     }
   };
 
-  // Continuous voice input hook
-  const {
-    isListening,
-    transcript,
-    interimTranscript,
-    error: voiceError,
-    toggleListening,
-    stopListening,
-  } = useVoiceInput({
-    onFinalTranscript: (text) => {
-      handleSendMessage(text);
-    },
-  });
-
-  // Global keyboard shortcuts
+  // Global keyboard shortcuts (Esc flushes audio, Cmd+K focuses input)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -216,16 +344,18 @@ export default function SofiaStageHome() {
         inputRef.current?.focus();
       }
       if (e.key === 'Escape') {
+        if (liveSessionRef.current) {
+          liveSessionRef.current.flushAudio();
+        }
         stopSpeaking();
         setIsSpeaking(false);
-        stopListening();
         // Dismiss unpinned panes
         setPanes((prev) => prev.filter((p) => p.pinned));
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [stopListening]);
+  }, []);
 
   const handleDismissPane = (id: string) => {
     setPanes((prev) => prev.filter((p) => p.id !== id));
@@ -259,6 +389,9 @@ export default function SofiaStageHome() {
 
   const toggleMute = () => {
     if (isSpeaking) {
+      if (liveSessionRef.current) {
+        liveSessionRef.current.flushAudio();
+      }
       stopSpeaking();
       setIsSpeaking(false);
     }
@@ -267,20 +400,28 @@ export default function SofiaStageHome() {
 
   const suggestions = [
     { label: '/stats', prompt: 'Give me a summary of my stats and output today' },
-    { label: '/focus', prompt: 'Start a 45-minute focus session' },
+    { label: '/screenshot', prompt: 'Take a screenshot of my laptop screen' },
     { label: '/tasks', prompt: 'What tasks are on my list today?' },
-    { label: '/timeline', prompt: 'Show me my activity timeline for today' },
+    { label: '/wazuh', prompt: 'Run the wazuh log tail action' },
+    { label: '/focus', prompt: 'Start a 45-minute focus session' },
   ];
 
   return (
     <div className="relative min-h-screen w-full bg-[#080205] text-rose-50 flex flex-col justify-between overflow-x-hidden selection:bg-rose-600/30">
-      {/* Subtle Ambient Cosmic Background Lighting */}
+      {/* Telemetry Debug Overlay */}
+      <LiveDebugOverlay
+        metrics={debugMetrics}
+        visible={showDebug}
+        onClose={() => setShowDebug(false)}
+      />
+
+      {/* Cosmic Backdrop Lighting */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] rounded-full bg-radial from-rose-950/25 via-burgundy-950/15 to-transparent blur-3xl opacity-70" />
         <div className="absolute bottom-10 right-10 w-[450px] h-[450px] rounded-full bg-radial from-burgundy-900/15 to-transparent blur-3xl opacity-50" />
       </div>
 
-      {/* TOP MINIMAL STATUS BAR */}
+      {/* TOP STATUS BAR */}
       <header className="relative z-30 w-full max-w-7xl mx-auto px-6 pt-5 pb-2 flex items-center justify-between">
         {/* Left: Clock & Mood Pill */}
         <div className="flex items-center space-x-3">
@@ -288,19 +429,51 @@ export default function SofiaStageHome() {
             {currentTime || '12:00'}
           </span>
           <div className="flex items-center space-x-1.5 px-3 py-1 rounded-full bg-burgundy-950/70 border border-burgundy-800/40 shadow-sm text-xs font-mono">
-            <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse" />
+            <span
+              className={`w-2 h-2 rounded-full ${
+                liveState === 'speaking'
+                  ? 'bg-rose-400 animate-ping'
+                  : liveState === 'listening'
+                  ? 'bg-emerald-400 animate-pulse'
+                  : liveState === 'connecting'
+                  ? 'bg-amber-400 animate-pulse'
+                  : 'bg-rose-400'
+              }`}
+            />
             <span className="text-rose-200 font-medium">{moodLabel}</span>
             <span className="text-rose-400/40">|</span>
             <span className="text-rose-300 font-bold">{score} pts</span>
           </div>
         </div>
 
-        {/* Right: Quick Action Controls + Secondary Menu */}
+        {/* Right: Quick Action Controls */}
         <div className="flex items-center space-x-2">
+          {/* Debug telemetry toggle */}
+          <button
+            onClick={() => setShowDebug(!showDebug)}
+            title="Toggle live telemetry overlay"
+            className={`p-2 rounded-xl text-xs font-mono border transition-all ${
+              showDebug
+                ? 'bg-rose-950/90 text-rose-200 border-rose-500/60 shadow-[0_0_12px_rgba(244,63,94,0.3)]'
+                : 'bg-burgundy-950/60 hover:bg-burgundy-900/50 text-rose-300 border-burgundy-800/40'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Voice Audition Route shortcut */}
+          <Link
+            href="/audition"
+            title="Voice Audition (Aoede, Leda, Achernar)"
+            className="p-2 rounded-xl text-xs font-mono border bg-burgundy-950/60 hover:bg-burgundy-900/50 text-rose-300 border-burgundy-800/40 transition-all"
+          >
+            <Headphones className="w-3.5 h-3.5" />
+          </Link>
+
           {/* Rest Day Toggle */}
           <button
             onClick={toggleRestDay}
-            title={isRestDay ? 'Rest day active (click to resume normal schedule)' : 'Set Rest Day'}
+            title={isRestDay ? 'Rest day active (click to resume)' : 'Set Rest Day'}
             className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-mono border transition-all ${
               isRestDay
                 ? 'bg-rose-900/70 text-rose-100 border-rose-400/50 shadow-[0_0_15px_rgba(225,29,72,0.4)]'
@@ -324,7 +497,7 @@ export default function SofiaStageHome() {
             {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
           </button>
 
-          {/* Secondary Navigation Dropdown (⋯) */}
+          {/* Secondary Navigation Dropdown */}
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen(!menuOpen)}
@@ -399,13 +572,17 @@ export default function SofiaStageHome() {
           isSpeaking={isSpeaking}
           score={score}
           captionText={captionText}
+          userCaption={userCaption}
+          liveState={liveState}
+          mouthOpen={mouthOpen}
+          micLevel={micLevel}
           panes={panes}
           onDismissPane={handleDismissPane}
           onPinPane={handlePinPane}
         />
       </main>
 
-      {/* BOTTOM UNIFIED DOCK (Mic + Input Bar + Shortcuts) */}
+      {/* BOTTOM UNIFIED DOCK (Talk / Hang up + Text Input) */}
       <footer className="relative z-30 w-full max-w-3xl mx-auto px-6 pb-6 pt-2 flex flex-col space-y-2.5">
         {/* Quick Suggestion Pills */}
         {showSuggestions && (
@@ -422,30 +599,34 @@ export default function SofiaStageHome() {
           </div>
         )}
 
-        {/* Live Speech Interim Preview */}
-        {(transcript || interimTranscript) && (
-          <div className="px-4 py-2 rounded-xl bg-rose-950/70 border border-rose-500/30 text-xs font-mono text-rose-200 flex items-center space-x-2 animate-fadeIn">
-            <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping shrink-0" />
-            <span className="truncate">
-              {transcript} <span className="text-rose-400/70 italic">{interimTranscript}</span>
-            </span>
-          </div>
-        )}
-
         {/* Unified Input Dock Bar */}
         <div className="relative flex items-center space-x-2 p-1.5 rounded-2xl glass-panel border border-burgundy-700/50 shadow-[0_8px_32px_rgba(20,3,10,0.8)]">
-          {/* Continuous Mic Button */}
+          {/* Full Duplex Talk / Hang up Button */}
           <button
-            onClick={toggleListening}
-            aria-label={isListening ? 'Stop listening' : 'Start voice input'}
-            title={isListening ? 'Microphone active (click to stop)' : 'Click to talk (or hold Space)'}
-            className={`p-3 rounded-xl transition-all flex items-center justify-center shrink-0 min-w-[44px] min-h-[44px] ${
-              isListening
-                ? 'bg-rose-600 text-white shadow-[0_0_20px_rgba(225,29,72,0.8)] animate-pulse'
-                : 'bg-burgundy-950/70 hover:bg-burgundy-900/60 text-rose-300 hover:text-white border border-burgundy-800/40'
+            onClick={toggleLiveVoice}
+            aria-label={liveState !== 'off' ? 'Hang up live voice call' : 'Start live voice call'}
+            title={
+              liveState !== 'off'
+                ? 'Hang up (ends duplex live session)'
+                : 'Talk (starts Gemini 3.8 Live bidirectional session)'
+            }
+            className={`px-4 py-3 rounded-xl transition-all flex items-center justify-center space-x-2 shrink-0 min-w-[105px] min-h-[44px] ${
+              liveState !== 'off'
+                ? 'bg-gradient-to-r from-red-800 to-rose-900 hover:from-red-700 hover:to-rose-800 text-white shadow-[0_0_20px_rgba(225,29,72,0.6)] animate-pulse'
+                : 'bg-gradient-to-r from-rose-600 to-crimson-600 hover:from-rose-500 hover:to-crimson-500 text-white shadow-[0_0_15px_rgba(225,29,72,0.4)]'
             }`}
           >
-            {isListening ? <Mic className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            {liveState !== 'off' ? (
+              <>
+                <PhoneOff className="w-4 h-4 text-rose-200" />
+                <span className="text-xs font-bold font-mono tracking-wider">Hang up</span>
+              </>
+            ) : (
+              <>
+                <Mic className="w-4 h-4 text-rose-100" />
+                <span className="text-xs font-bold font-mono tracking-wider">Talk</span>
+              </>
+            )}
           </button>
 
           {/* Unified Text Input */}
@@ -467,7 +648,11 @@ export default function SofiaStageHome() {
               onFocus={() => {
                 if (inputText.startsWith('/')) setShowSuggestions(true);
               }}
-              placeholder="Ask Sofia or type / for commands (Cmd+K)"
+              placeholder={
+                liveState !== 'off'
+                  ? 'Type to Sofia (pauses voice stream)...'
+                  : 'Ask Sofia or type / for commands (Cmd+K)'
+              }
               className="flex-1 bg-transparent px-3 py-2.5 text-sm text-rose-50 placeholder:text-rose-400/50 focus:outline-none min-h-[44px]"
             />
 
@@ -476,10 +661,10 @@ export default function SofiaStageHome() {
               type="submit"
               disabled={isSending || !inputText.trim()}
               aria-label="Send message"
-              className="p-3 rounded-xl bg-gradient-to-r from-rose-700 to-crimson-600 hover:from-rose-600 hover:to-crimson-500 disabled:opacity-30 text-white transition-all shadow-[0_0_15px_rgba(225,29,72,0.3)] shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
+              className="p-3 rounded-xl bg-burgundy-950/80 hover:bg-rose-900/60 border border-burgundy-800/40 disabled:opacity-30 text-rose-200 transition-all shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
             >
               {isSending ? (
-                <Bot className="w-4 h-4 animate-spin text-rose-200" />
+                <Bot className="w-4 h-4 animate-spin text-rose-300" />
               ) : (
                 <Send className="w-4 h-4" />
               )}
@@ -489,8 +674,8 @@ export default function SofiaStageHome() {
 
         {/* Keyboard shortcut hint */}
         <div className="flex justify-between items-center text-[10px] font-mono text-rose-400/60 px-2">
-          <span>Esc: stop audio / dismiss panes</span>
-          <span>Cmd+K: focus input</span>
+          <span>Esc: flush audio / dismiss panes</span>
+          <span>Cmd+K: focus input · ?debug=1 for telemetry</span>
         </div>
       </footer>
     </div>
