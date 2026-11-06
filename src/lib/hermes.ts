@@ -44,7 +44,6 @@ export async function checkHermesStatus(settings: SofiaSettings): Promise<{
   online: boolean;
   port: number;
   provider: string;
-  computerUseEnabled: boolean;
   toolsets: string[];
   error?: string;
 }> {
@@ -64,7 +63,6 @@ export async function checkHermesStatus(settings: SofiaSettings): Promise<{
         online: false,
         port: 8642,
         provider: settings.hermes.provider,
-        computerUseEnabled: false,
         toolsets: [],
         error: `HTTP ${res.status}: ${res.statusText}`,
       };
@@ -74,15 +72,11 @@ export async function checkHermesStatus(settings: SofiaSettings): Promise<{
     const toolsetsList = Array.isArray(data.data)
       ? data.data.map((t: { name: string; enabled: boolean }) => t.name)
       : [];
-    const cu = Array.isArray(data.data)
-      ? data.data.find((t: { name: string; enabled: boolean }) => t.name === 'computer_use')?.enabled ?? false
-      : false;
 
     return {
       online: true,
       port: 8642,
       provider: settings.hermes.provider,
-      computerUseEnabled: cu,
       toolsets: toolsetsList,
     };
   } catch (err) {
@@ -90,7 +84,6 @@ export async function checkHermesStatus(settings: SofiaSettings): Promise<{
       online: false,
       port: 8642,
       provider: settings.hermes.provider,
-      computerUseEnabled: false,
       toolsets: [],
       error: err instanceof Error ? err.message : String(err),
     };

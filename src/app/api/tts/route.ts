@@ -20,11 +20,11 @@ export async function POST(req: NextRequest) {
       settings.voice.elevenlabs_api_key ||
       process.env.ELEVENLABS_API_KEY;
 
-    // Default to Rachel or configured voice
+    // Default to Bella or configured voice
     const voiceId =
       body.voiceId ||
       settings.voice.elevenlabs_voice_id ||
-      '21m00Tcm4TlvDq8ikWAM';
+      'EXAVITQu4vr4xnSDxMaL';
 
     // Hash check for local disk cache
     const hash = crypto
