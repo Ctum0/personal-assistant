@@ -7,14 +7,18 @@ export async function POST(
   { params }: { params: Promise<{ job: string }> }
 ) {
   try {
-    const { job } = await params;
+    const { job: requestedJob } = await params;
+    const job = requestedJob === 'evening_verdict' ? 'daily_verdict' : requestedJob;
 
-    // Check CRON_SECRET if configured
-    const expectedSecret = process.env.CRON_SECRET;
-    if (expectedSecret) {
-      const headerSecret = req.headers.get('x-cron-secret');
-      if (headerSecret !== expectedSecret) {
-        return NextResponse.json({ error: 'unauthorized_cron_secret' }, { status: 401 });
+    // Check Bearer token or CRON_SECRET if configured
+    const expectedToken = process.env.SOFIA_API_TOKEN || process.env.CRON_SECRET;
+    if (expectedToken) {
+      const authHeader = req.headers.get('authorization');
+      const bearerToken = authHeader?.replace(/^Bearer\s+/i, '').trim();
+      const cronSecret = req.headers.get('x-cron-secret');
+
+      if (bearerToken !== expectedToken && cronSecret !== expectedToken) {
+        return NextResponse.json({ error: 'unauthorized_token' }, { status: 401 });
       }
     }
 
@@ -24,7 +28,7 @@ export async function POST(
     const validJobs = ['wake_report', 'midday_check', 'daily_verdict', 'github_sync'];
     if (!validJobs.includes(job)) {
       return NextResponse.json(
-        { error: `Invalid cron job: ${job}. Valid jobs: ${validJobs.join(', ')}` },
+        { error: `Invalid cron job: ${requestedJob}. Valid jobs: wake_report, midday_check, evening_verdict (daily_verdict), github_sync` },
         { status: 400 }
       );
     }

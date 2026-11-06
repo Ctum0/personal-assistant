@@ -146,7 +146,8 @@ function initDatabase(db: DatabaseSync) {
       action TEXT NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 1,
       last_run TEXT,
-      next_run TEXT
+      next_run TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS proactive_log (
@@ -163,6 +164,7 @@ function initDatabase(db: DatabaseSync) {
   try { db.exec('ALTER TABLE day_stats ADD COLUMN offline_min INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE day_stats ADD COLUMN tasks_done INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE rules ADD COLUMN created_at TEXT NOT NULL DEFAULT ""'); } catch {}
+  try { db.exec('ALTER TABLE schedules ADD COLUMN created_at TEXT NOT NULL DEFAULT ""'); } catch {}
 
   seedDefaults(db);
 }
@@ -245,13 +247,14 @@ function seedDefaults(db: DatabaseSync) {
     });
   }
 
-  // 5. Schedules (the 3 v1 jobs per spec §8)
+  // 5. Schedules (VPS cron jobs per spec: 07:30, 12:00, 22:00)
   const schedCount = db.prepare('SELECT count(*) as count FROM schedules').get() as { count: number };
   if (schedCount.count === 0) {
-    const insertSched = db.prepare('INSERT INTO schedules (id, name, cron, action, enabled) VALUES (?, ?, ?, ?, 1)');
-    insertSched.run('sched-wake', 'wake_report', '15 6-11 * * *', 'wake_report');
-    insertSched.run('sched-midday', 'midday_check', '0 13 * * *', 'midday_check');
-    insertSched.run('sched-verdict', 'daily_verdict', '0 22 * * *', 'daily_verdict');
+    const insertSched = db.prepare('INSERT INTO schedules (id, name, cron, action, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)');
+    const nowIso = new Date().toISOString();
+    insertSched.run('sched-wake', 'wake_report', '30 7 * * *', 'wake_report', nowIso);
+    insertSched.run('sched-midday', 'midday_check', '0 12 * * *', 'midday_check', nowIso);
+    insertSched.run('sched-verdict', 'evening_verdict', '0 22 * * *', 'daily_verdict', nowIso);
   }
 
   // 6. Seed sample events for today if empty to bring the dashboard alive immediately
