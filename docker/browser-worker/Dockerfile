@@ -15,7 +15,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml* ./
 
 # Install dependencies including playwright and tsx
-RUN npm install -g pnpm tsx && pnpm install --frozen-lockfile
+RUN npm install -g pnpm tsx && pnpm install --frozen-lockfile --ignore-scripts
 
 # Copy worker application code
 COPY tsconfig.json ./
