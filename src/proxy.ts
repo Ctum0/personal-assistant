@@ -27,6 +27,11 @@ export function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // 2b. Browser SSE stream with ticket parameter passes through to route handler for SQLite verification
+  if (pathname.includes('/stream') && req.nextUrl.searchParams.get('ticket')) {
+    return NextResponse.next();
+  }
+
   // 3. API route protection
   if (pathname.startsWith('/api')) {
     const auth = verifyApiAuth(req);
