@@ -7,7 +7,10 @@ export async function POST(req: NextRequest) {
   try {
     const auth = verifyApiAuth(req);
     if (!auth.authorized) {
-      return auth.response!;
+      return NextResponse.json(
+        { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Unauthorized: Missing or invalid authentication token' } },
+        { status: 401 }
+      );
     }
 
     const body = await req.json();
