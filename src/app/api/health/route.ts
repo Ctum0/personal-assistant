@@ -29,6 +29,9 @@ export async function GET() {
   let hermesStatus: 'ready' | 'degraded' | 'not_configured' | 'unreachable' | 'blocked_on_owner_action' =
     hermesConfigured ? 'degraded' : 'not_configured';
 
+  let hermesProfile: string | null = null;
+  let hermesVersion: string | null = null;
+
   if (rotationPending) {
     hermesStatus = 'blocked_on_owner_action';
   } else if (hermesConfigured) {
@@ -46,6 +49,8 @@ export async function GET() {
         )
       );
       hermesStatus = canSubmitRuns ? 'ready' : 'degraded';
+      hermesProfile = caps?.model || 'sofia';
+      hermesVersion = (caps as any)?.version || '0.22.2';
     } catch {
       hermesReachable = false;
       canSubmitRuns = false;
@@ -67,6 +72,8 @@ export async function GET() {
       reachable: hermesReachable,
       canSubmitRuns,
       status: hermesStatus,
+      profile: hermesProfile,
+      version: hermesVersion,
       endpoint: hermesConfig.baseUrl ? hermesConfig.baseUrl.replace(/\/+$/, '') : null,
     },
     coverage,

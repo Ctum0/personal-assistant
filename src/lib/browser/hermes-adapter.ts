@@ -144,6 +144,26 @@ export class HermesBrowserToolAdapter {
     method: string;
     params?: any;
   }): Promise<{ jsonrpc: string; id: string | number; result?: any; error?: any }> {
+    if (request.method === 'initialize') {
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        result: {
+          protocolVersion: '2024-11-05',
+          capabilities: { tools: {} },
+          serverInfo: { name: 'sofia-browser', version: '1.0.0' },
+        },
+      };
+    }
+
+    if (request.method === 'notifications/initialized') {
+      return { jsonrpc: '2.0', id: request.id, result: {} };
+    }
+
+    if (request.method === 'ping') {
+      return { jsonrpc: '2.0', id: request.id, result: {} };
+    }
+
     if (request.method === 'tools/list') {
       return {
         jsonrpc: '2.0',
