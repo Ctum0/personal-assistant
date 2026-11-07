@@ -5,10 +5,10 @@ import { NextRequest, NextResponse } from 'next/server';
  * Checks against SOFIA_API_TOKEN (or SOFIA_AUTH_TOKEN) env variable.
  */
 export function verifyApiAuth(req: NextRequest): { authorized: boolean; response?: NextResponse } {
-  const expectedToken = process.env.SOFIA_API_TOKEN || process.env.SOFIA_AUTH_TOKEN;
+  const validTokens = [process.env.SOFIA_API_TOKEN, process.env.SOFIA_AUTH_TOKEN].filter(Boolean) as string[];
 
   // If no token is set in the environment, allow access (local dev mode)
-  if (!expectedToken) {
+  if (validTokens.length === 0) {
     return { authorized: true };
   }
 
@@ -23,20 +23,20 @@ export function verifyApiAuth(req: NextRequest): { authorized: boolean; response
   const authHeader = req.headers.get('authorization');
   if (authHeader) {
     const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    if (token === expectedToken) {
+    if (validTokens.includes(token)) {
       return { authorized: true };
     }
   }
 
   // 2. Check X-Sofia-Token header
   const customHeader = req.headers.get('x-sofia-token');
-  if (customHeader && customHeader === expectedToken) {
+  if (customHeader && validTokens.includes(customHeader)) {
     return { authorized: true };
   }
 
   // 3. Check cookie
   const cookieToken = req.cookies.get('sofia_token')?.value;
-  if (cookieToken && cookieToken === expectedToken) {
+  if (cookieToken && validTokens.includes(cookieToken)) {
     return { authorized: true };
   }
 

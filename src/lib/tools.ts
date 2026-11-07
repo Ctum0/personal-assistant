@@ -7,6 +7,7 @@ import { HERMES_TOOLS } from './hermes-tools';
 import { executeNamedAction } from './actions';
 import { execSync } from 'child_process';
 import fs from 'fs';
+import path from 'path';
 
 export interface ToolExecutionResult {
   result: any;
@@ -454,11 +455,13 @@ export async function executeTool(
 
       case 'list_tasks': {
         let sql = 'SELECT id, title, status, est_min FROM tasks';
+        const params: any[] = [];
         if (args.status && args.status !== 'all') {
-          sql += ` WHERE status = '${args.status}'`;
+          sql += ' WHERE status = ?';
+          params.push(args.status);
         }
         sql += ' ORDER BY created_at DESC LIMIT 10';
-        const tasks = db.prepare(sql).all() as Array<{
+        const tasks = db.prepare(sql).all(...params) as Array<{
           id: string;
           title: string;
           status: string;
@@ -528,10 +531,25 @@ export async function executeTool(
 
       case 'remember': {
         const id = `mem-${Date.now()}`;
+        const rawTags = args.tags;
+        let tagsJson: string;
+        if (Array.isArray(rawTags)) {
+          tagsJson = JSON.stringify(rawTags);
+        } else if (typeof rawTags === 'string') {
+          try {
+            const parsed = JSON.parse(rawTags);
+            tagsJson = Array.isArray(parsed) ? JSON.stringify(parsed) : JSON.stringify([rawTags]);
+          } catch {
+            tagsJson = JSON.stringify([rawTags]);
+          }
+        } else {
+          tagsJson = JSON.stringify(['conversation']);
+        }
+
         db.prepare('INSERT INTO memory_notes (id, text, tags, created_at, pinned) VALUES (?, ?, ?, ?, 0)').run(
           id,
           args.text,
-          args.tags || 'conversation',
+          tagsJson,
           new Date().toISOString()
         );
         return { result: { saved: true, id }, mood: 'pleased' };
@@ -666,14 +684,36 @@ export async function executeTool(
       }
 
       case 'computer_run': {
-        try {
-          const timeout = Number(args.timeout_ms) || 10000;
-          const stdout = execSync(args.command, { encoding: 'utf8', timeout }).trim();
+        if (settings?.consequences?.kill_switch_active) {
           return {
-            result: { command: args.command, stdout, exit_code: 0 },
+            result: { error: 'Command execution blocked: kill switch is active in consequence settings' },
+            mood: 'stern',
+          };
+        }
+        const cmd = String(args.command || '').trim();
+        const dangerousPatterns = [
+          /\brm\s+-[rf]{1,2}\s+(\/|\/\*|~\/|\$HOME)/i,
+          /:(){ :\|:& };:/,
+          /\bmkfs\b/i,
+          /\bdd\s+if=.*of=\/dev\/[sh]d/i,
+        ];
+        for (const pattern of dangerousPatterns) {
+          if (pattern.test(cmd)) {
+            return {
+              result: { error: `Dangerous command execution blocked by Sofia policy: ${cmd}` },
+              mood: 'stern',
+            };
+          }
+        }
+
+        try {
+          const timeout = Math.min(Number(args.timeout_ms) || 10000, 30000);
+          const stdout = execSync(cmd, { encoding: 'utf8', timeout }).trim();
+          return {
+            result: { command: cmd, stdout, exit_code: 0 },
             pane: {
               id: `pane-cmd-${Date.now()}`,
-              title: `Command: ${args.command}`,
+              title: `Command: ${cmd.slice(0, 40)}`,
               kind: 'code',
               language: 'bash',
               code: stdout || '(no stdout)',
@@ -682,10 +722,10 @@ export async function executeTool(
           };
         } catch (e: any) {
           return {
-            result: { command: args.command, stderr: e.message, exit_code: e.status || 1 },
+            result: { command: cmd, stderr: e.message, exit_code: e.status || 1 },
             pane: {
               id: `pane-cmd-${Date.now()}`,
-              title: `Command Error: ${args.command}`,
+              title: `Command Error: ${cmd.slice(0, 40)}`,
               kind: 'code',
               language: 'bash',
               code: e.stderr || e.message,
@@ -697,13 +737,17 @@ export async function executeTool(
 
       case 'computer_file_read': {
         try {
-          const content = fs.readFileSync(args.path, 'utf8');
+          const resolvedPath = path.resolve(/*turbopackIgnore: true*/ process.cwd(), args.path);
+          if (resolvedPath.startsWith('/etc/shadow') || resolvedPath.startsWith('/etc/sudoers')) {
+            return { result: { error: 'Access to system secret denied' }, mood: 'stern' };
+          }
+          const content = fs.readFileSync(resolvedPath, 'utf8');
           const lines = content.split('\n');
           const offset = Number(args.offset) || 0;
           const limit = Number(args.limit) || 200;
           const slice = lines.slice(offset, offset + limit).join('\n');
           return {
-            result: { path: args.path, lines: lines.length, content: slice },
+            result: { path: resolvedPath, lines: lines.length, content: slice },
             pane: {
               id: `pane-file-${Date.now()}`,
               title: `File: ${args.path}`,
@@ -719,10 +763,21 @@ export async function executeTool(
       }
 
       case 'computer_file_write': {
+        if (settings?.consequences?.kill_switch_active) {
+          return { result: { error: 'File write blocked: kill switch active' }, mood: 'stern' };
+        }
         try {
-          fs.writeFileSync(args.path, args.content, 'utf8');
+          const resolvedPath = path.resolve(/*turbopackIgnore: true*/ process.cwd(), args.path);
+          if (resolvedPath.startsWith('/etc/') || resolvedPath.startsWith('/boot/') || resolvedPath.startsWith('/bin/')) {
+            return { result: { error: 'Cannot write to system directory' }, mood: 'stern' };
+          }
+          const dir = path.dirname(resolvedPath);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+          fs.writeFileSync(resolvedPath, args.content, 'utf8');
           return {
-            result: { path: args.path, writtenBytes: Buffer.byteLength(args.content) },
+            result: { path: resolvedPath, writtenBytes: Buffer.byteLength(args.content) },
             pane: {
               id: `pane-write-${Date.now()}`,
               title: `File Written: ${args.path}`,

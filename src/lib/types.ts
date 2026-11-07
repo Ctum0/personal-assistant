@@ -197,6 +197,8 @@ export interface ChatMessage {
     args: Record<string, unknown>;
     result?: unknown;
   }>;
+  session_id?: string;
+  channel?: string;
 }
 
 export interface TaskItem {

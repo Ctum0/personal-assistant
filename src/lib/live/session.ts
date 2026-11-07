@@ -74,6 +74,8 @@ export class SofiaLiveSession {
   private isUserSpeaking = false;
   private userSpeechStartTime = 0;
   private userSpeechEndTime = 0;
+  private lastUserVoiceTime = 0;
+  private sessionId = `live-${Date.now()}`;
   private turnStartTime = 0;
   private isModelSpeaking = false;
   private textSpokenSoFar = '';
@@ -89,7 +91,7 @@ export class SofiaLiveSession {
   private metricsTimer: NodeJS.Timeout | null = null;
   private hardCapTimer: NodeJS.Timeout | null = null;
   private turnTimeoutTimer: NodeJS.Timeout | null = null;
-  private activeModel = 'gemini-3.8-live';
+  private activeModel = 'gemini-2.0-flash-exp';
   private activeVoice = 'Aoede';
 
   // Metrics
@@ -356,6 +358,22 @@ export class SofiaLiveSession {
         clearTimeout(this.turnTimeoutTimer);
         this.turnTimeoutTimer = null;
       }
+      // Persist the completed turn to messages table so conversation context is never lost
+      if (this.modelCaption.trim() || this.userCaption.trim()) {
+        const uText = this.userCaption.trim();
+        const mText = this.modelCaption.trim();
+        fetch('/api/chat', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            persistOnly: true,
+            channel: 'voice',
+            sessionId: this.sessionId,
+            userMessage: uText || '(Spoken voice input)',
+            assistantMessage: mText,
+          }),
+        }).catch((err) => console.warn('Failed to persist live voice turn:', err));
+      }
     }
 
     // 6. Tool Call Execution
@@ -446,6 +464,7 @@ export class SofiaLiveSession {
       };
 
       source.connect(worklet);
+      this.setState('listening');
     } catch (err) {
       console.warn('Failed to start audio worklet mic capture:', err);
     }
@@ -470,6 +489,7 @@ export class SofiaLiveSession {
       const now = Date.now();
 
       if (rms > SPEECH_RMS_THRESHOLD) {
+        this.lastUserVoiceTime = now;
         if (!this.isUserSpeaking) {
           this.isUserSpeaking = true;
           this.userSpeechStartTime = now;
@@ -484,7 +504,8 @@ export class SofiaLiveSession {
         }
       } else {
         if (this.isUserSpeaking) {
-          if (now - this.userSpeechStartTime > 300) {
+          // Require at least 600ms continuous silence before ending turn
+          if (now - this.lastUserVoiceTime >= 600) {
             // User finished speaking turn
             this.isUserSpeaking = false;
             this.userSpeechEndTime = now;
@@ -535,6 +556,7 @@ export class SofiaLiveSession {
       this.playHead = at + audioBuffer.duration;
       this.activeSources.push(sourceNode);
       this.isModelSpeaking = true;
+      this.setState('speaking');
 
       sourceNode.onended = () => {
         const idx = this.activeSources.indexOf(sourceNode);
@@ -542,6 +564,7 @@ export class SofiaLiveSession {
         if (this.activeSources.length === 0) {
           this.isModelSpeaking = false;
           this.currentRms = 0;
+          this.setState('listening');
         }
       };
 
@@ -574,6 +597,7 @@ export class SofiaLiveSession {
     this.currentRms = 0;
     this.lastMouthOpen = 0;
     this.callbacks.onMouthOpen?.(0);
+    this.setState('listening');
   }
 
   /**

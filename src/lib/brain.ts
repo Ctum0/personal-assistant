@@ -391,11 +391,13 @@ export function executeSofiaTool(
       }
       case 'list_tasks': {
         let sql = 'SELECT id, title, status, est_min FROM tasks';
+        const params: any[] = [];
         if (args.status && args.status !== 'all') {
-          sql += ` WHERE status = '${args.status}'`;
+          sql += ' WHERE status = ?';
+          params.push(args.status);
         }
         sql += ' ORDER BY created_at DESC LIMIT 10';
-        const tasks = db.prepare(sql).all() as Array<{
+        const tasks = db.prepare(sql).all(...params) as Array<{
           id: string;
           title: string;
           status: string;
@@ -636,11 +638,12 @@ ${pinnedNotes.map((n, i) => `${i + 1}. ${n.text}`).join('\n')}`;
       const geminiSystemPrompt = `${systemPrompt}\n\n${contextMessage}\n\nAlways stay in character as Sofia. Output response as JSON with format: {"say": "string", "mood": "focused|pleased|amused|stern|disappointed|concerned|sleepy|neutral"}. You have tools to get real telemetry stats, timeline, tasks, memory, screenshot, shell execution, and files. Use them whenever appropriate.`;
 
       let geminiLoops = 0;
+      const geminiModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
       while (geminiLoops < 3) {
         geminiLoops++;
 
         const geminiRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${geminiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

@@ -76,7 +76,7 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
   };
 
   const getSrc = (exp: SofiaExpression) => {
-    return EXPRESSION_IMAGES[exp] || '/sofia/expressions/neutral.png';
+    return EXPRESSION_IMAGES[exp] || '/sofia/expressions/neutral.webp';
   };
 
   // Compute mouth open scale (height between 2px and 14px)
@@ -151,7 +151,7 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
             alt={`Sofia ${prevExp}`}
             className="absolute inset-0 w-full h-full object-contain pointer-events-none drop-shadow-[0_12px_24px_rgba(0,0,0,0.6)] transition-opacity duration-180 opacity-0"
             onError={(e) => {
-              (e.target as HTMLImageElement).src = '/sofia/expressions/neutral.png';
+              (e.target as HTMLImageElement).src = '/sofia/expressions/neutral.webp';
             }}
           />
         )}
@@ -160,11 +160,9 @@ export const SofiaAvatar: React.FC<SofiaAvatarProps> = ({
         <img
           src={getSrc(currentExp)}
           alt={`Sofia ${currentExp}`}
-          className={`relative w-full h-full object-contain pointer-events-none drop-shadow-[0_12px_24px_rgba(0,0,0,0.6)] transition-opacity duration-180 ${
-            isCrossfading ? 'opacity-100' : 'opacity-100'
-          }`}
+          className="relative w-full h-full object-contain pointer-events-none drop-shadow-[0_12px_24px_rgba(0,0,0,0.6)] transition-opacity duration-180 opacity-100"
           onError={(e) => {
-            (e.target as HTMLImageElement).src = '/sofia/expressions/neutral.png';
+            (e.target as HTMLImageElement).src = '/sofia/expressions/neutral.webp';
           }}
         />
 

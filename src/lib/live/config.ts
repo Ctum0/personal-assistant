@@ -23,7 +23,7 @@ export function getLiveConfig(db: DatabaseSync): LiveConfig {
     (process.env.SOFIA_LIVE_MODALITIES ?? 'AUDIO') === 'TEXT' ? ['TEXT'] : ['AUDIO'];
 
   return {
-    model: process.env.SOFIA_LIVE_MODEL ?? 'gemini-3.8-live',
+    model: process.env.SOFIA_LIVE_MODEL ?? 'gemini-2.0-flash-exp',
     voice: process.env.SOFIA_LIVE_VOICE ?? 'Aoede',
     modalities,
     systemPrompt: buildVoicePersona(db),

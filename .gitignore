@@ -43,6 +43,8 @@ next-env.d.ts
 .next-server.log
 data/*.db
 data/*.db-journal
+data/*.db-wal
+data/*.db-shm
 data/audio/
 data/backups/
 

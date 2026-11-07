@@ -27,13 +27,21 @@ let _db: DatabaseSync | null = null;
 export function getDatabase(): DatabaseSync {
   if (!_db) {
     _db = new DatabaseSync(DB_PATH);
+    try {
+      _db.exec(`
+        PRAGMA journal_mode = WAL;
+        PRAGMA busy_timeout = 5000;
+        PRAGMA synchronous = NORMAL;
+      `);
+    } catch (e) {
+      console.warn('Failed to configure SQLite pragmas:', e);
+    }
     initDatabase(_db);
   }
   return _db;
 }
 
-
-function initDatabase(db: DatabaseSync) {
+export function initDatabase(db: DatabaseSync) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS events (
       id TEXT PRIMARY KEY,
@@ -79,7 +87,9 @@ function initDatabase(db: DatabaseSync) {
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       mood TEXT,
-      tool_calls TEXT
+      tool_calls TEXT,
+      session_id TEXT NOT NULL DEFAULT 'default',
+      channel TEXT NOT NULL DEFAULT 'chat'
     );
 
     CREATE TABLE IF NOT EXISTS memory_notes (
@@ -175,11 +185,24 @@ function initDatabase(db: DatabaseSync) {
     );
   `);
 
-  // Migration guards for columns added in v2
+  // Migration guards for columns added in v2 & v3
   try { db.exec('ALTER TABLE day_stats ADD COLUMN offline_min INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE day_stats ADD COLUMN tasks_done INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE rules ADD COLUMN created_at TEXT NOT NULL DEFAULT ""'); } catch {}
   try { db.exec('ALTER TABLE schedules ADD COLUMN created_at TEXT NOT NULL DEFAULT ""'); } catch {}
+  try { db.exec("ALTER TABLE messages ADD COLUMN session_id TEXT NOT NULL DEFAULT 'default'"); } catch {}
+  try { db.exec("ALTER TABLE messages ADD COLUMN channel TEXT NOT NULL DEFAULT 'chat'"); } catch {}
+
+  // Secondary indexes for performance & fast query lookup
+  try {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+      CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+      CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(ts);
+      CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_notes_pinned ON memory_notes(pinned);
+    `);
+  } catch {}
 
   seedDefaults(db);
 }
