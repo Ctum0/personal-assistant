@@ -50,10 +50,20 @@ export function proxy(req: NextRequest) {
   const authHeader = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
   const customHeader = req.headers.get('x-sofia-token');
   const cookieToken = req.cookies.get('sofia_token')?.value;
-  const token = authHeader || customHeader || cookieToken;
+  const queryToken = req.nextUrl.searchParams.get('token')?.trim();
+  const token = authHeader || customHeader || cookieToken || queryToken;
 
   if (token === expectedToken) {
-    return NextResponse.next();
+    const res = NextResponse.next();
+    if (queryToken === expectedToken && !cookieToken) {
+      res.cookies.set('sofia_token', expectedToken, {
+        path: '/',
+        httpOnly: false,
+        secure: true,
+        sameSite: 'lax',
+      });
+    }
+    return res;
   }
 
   // Redirect unauthenticated browser users to /unlock
