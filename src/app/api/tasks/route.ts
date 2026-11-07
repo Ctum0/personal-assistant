@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/db';
 import { TaskItem } from '@/lib/types';
+import { verifyApiAuth } from '@/lib/auth';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
     const db = getDatabase();
     const tasks = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as unknown as TaskItem[];
     return NextResponse.json(tasks);
@@ -14,6 +19,10 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
     const db = getDatabase();
     const body = await req.json();
     const title = (body.title || '').trim();
@@ -43,6 +52,10 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
     const db = getDatabase();
     const body = await req.json();
     const { id, status, title, est_min } = body;
@@ -71,6 +84,10 @@ export async function PATCH(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
     const db = getDatabase();
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');

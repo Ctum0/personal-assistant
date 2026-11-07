@@ -35,12 +35,16 @@ export const Stage: React.FC<StageProps> = ({
   onPinPane,
 }) => {
   const paneCount = panes.length;
+  const hasBrowserPane = panes.some((p) => p.kind === 'browser');
 
   // Compute CSS custom property targets for Jarvis dynamic Stage layout
   let sofiaScale = 1;
   let sofiaShift = '0%';
 
-  if (paneCount === 1) {
+  if (hasBrowserPane) {
+    sofiaScale = 0.52;
+    sofiaShift = '-35%';
+  } else if (paneCount === 1) {
     sofiaScale = 0.75;
     sofiaShift = '-22%';
   } else if (paneCount >= 2) {

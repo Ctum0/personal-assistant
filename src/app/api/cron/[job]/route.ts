@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/db';
 import { executeProactiveJob } from '@/lib/proactive';
+import { verifyApiAuth } from '@/lib/auth';
 
 const JOB_ALIASES: Record<string, string> = {
   morning: 'wake_report',
@@ -15,24 +16,13 @@ export async function POST(
   { params }: { params: Promise<{ job: string }> }
 ) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
+
     const { job: rawJob } = await params;
     const job = JOB_ALIASES[rawJob] || rawJob;
-
-    // Check CRON_SECRET or bearer token if configured
-    const expectedSecret =
-      process.env.CRON_SECRET ||
-      process.env.SOFIA_AUTH_TOKEN ||
-      process.env.SOFIA_API_TOKEN;
-
-    if (expectedSecret) {
-      const authHeader = req.headers.get('authorization');
-      const bearerToken = authHeader?.replace(/^Bearer\s+/i, '').trim();
-      const cronSecret = req.headers.get('x-cron-secret');
-
-      if (bearerToken !== expectedSecret && cronSecret !== expectedSecret) {
-        return NextResponse.json({ error: 'unauthorized_token' }, { status: 401 });
-      }
-    }
 
     const searchParams = req.nextUrl.searchParams;
     const force = searchParams.get('force') === 'true';

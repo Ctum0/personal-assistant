@@ -179,3 +179,6 @@ export function evaluateConsequenceRequest(
   );
 }
 
+// Re-export centralized server-side risk policy & action hashing
+export * from './policy.risk';
+

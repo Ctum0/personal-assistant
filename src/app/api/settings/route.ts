@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase, getSettings, updateSettings } from '@/lib/db';
 import { elevenLabsBudgetLeft } from '@/lib/tts';
+import { verifyApiAuth } from '@/lib/auth';
 
 function stripSecrets(settings: any) {
   const sanitized = JSON.parse(JSON.stringify(settings));
@@ -13,8 +14,13 @@ function stripSecrets(settings: any) {
   return sanitized;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
+
     const db = getDatabase();
     const settings = getSettings(db);
     const budgetLeft = elevenLabsBudgetLeft(db);
@@ -32,6 +38,10 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
     const db = getDatabase();
     const body = await req.json();
 

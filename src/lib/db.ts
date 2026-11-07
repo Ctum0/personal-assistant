@@ -89,7 +89,8 @@ export function initDatabase(db: DatabaseSync) {
       mood TEXT,
       tool_calls TEXT,
       session_id TEXT NOT NULL DEFAULT 'default',
-      channel TEXT NOT NULL DEFAULT 'chat'
+      channel TEXT NOT NULL DEFAULT 'chat',
+      run_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS memory_notes (
@@ -183,6 +184,86 @@ export function initDatabase(db: DatabaseSync) {
       seconds REAL NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS hermes_runs (
+      id TEXT PRIMARY KEY,
+      hermes_run_id TEXT UNIQUE,
+      conversation_id TEXT NOT NULL,
+      hermes_session_id TEXT,
+      session_key_ref TEXT NOT NULL,
+      user_id TEXT NOT NULL DEFAULT 'owner',
+      status TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      output TEXT,
+      error TEXT,
+      last_event_id TEXT,
+      progress_meta TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS hermes_sessions (
+      conversation_id TEXT PRIMARY KEY,
+      hermes_session_id TEXT NOT NULL,
+      session_key_ref TEXT NOT NULL,
+      user_id TEXT NOT NULL DEFAULT 'owner',
+      channel TEXT NOT NULL DEFAULT 'text',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS hermes_approvals (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      hermes_run_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL DEFAULT 'default',
+      tool_name TEXT NOT NULL,
+      tool_call_id TEXT,
+      parameters TEXT,
+      preview_json TEXT NOT NULL DEFAULT '{}',
+      action_hash TEXT NOT NULL DEFAULT '',
+      risk_level TEXT NOT NULL DEFAULT 'R2',
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL DEFAULT '',
+      decided_at TEXT,
+      decision_reason TEXT,
+      approver_id TEXT NOT NULL DEFAULT 'owner',
+      outcome_ref TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS execution_audit_log (
+      id TEXT PRIMARY KEY,
+      seq INTEGER NOT NULL UNIQUE,
+      ts TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      run_id TEXT,
+      hermes_run_id TEXT,
+      conversation_id TEXT,
+      tool_call_id TEXT,
+      tool_name TEXT,
+      actor TEXT NOT NULL,
+      risk_level TEXT,
+      action_hash TEXT,
+      outcome TEXT,
+      details_json TEXT,
+      prev_hash TEXT NOT NULL,
+      record_hash TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS browser_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT 'owner',
+      conversation_id TEXT NOT NULL DEFAULT 'default',
+      title TEXT NOT NULL DEFAULT 'Browser Workspace',
+      current_url TEXT NOT NULL DEFAULT 'about:blank',
+      status TEXT NOT NULL DEFAULT 'active',
+      lease_holder TEXT NOT NULL DEFAULT 'HUMAN',
+      lease_expires_at TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Migration guards for columns added in v2 & v3
@@ -192,6 +273,17 @@ export function initDatabase(db: DatabaseSync) {
   try { db.exec('ALTER TABLE schedules ADD COLUMN created_at TEXT NOT NULL DEFAULT ""'); } catch {}
   try { db.exec("ALTER TABLE messages ADD COLUMN session_id TEXT NOT NULL DEFAULT 'default'"); } catch {}
   try { db.exec("ALTER TABLE messages ADD COLUMN channel TEXT NOT NULL DEFAULT 'chat'"); } catch {}
+  try { db.exec("ALTER TABLE messages ADD COLUMN run_id TEXT"); } catch {}
+
+  // Migration guards for hermes_approvals schema extension
+  try { db.exec("ALTER TABLE hermes_approvals ADD COLUMN conversation_id TEXT NOT NULL DEFAULT 'default'"); } catch {}
+  try { db.exec("ALTER TABLE hermes_approvals ADD COLUMN preview_json TEXT NOT NULL DEFAULT '{}'"); } catch {}
+  try { db.exec("ALTER TABLE hermes_approvals ADD COLUMN action_hash TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE hermes_approvals ADD COLUMN risk_level TEXT NOT NULL DEFAULT 'R2'"); } catch {}
+  try { db.exec("ALTER TABLE hermes_approvals ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE hermes_approvals ADD COLUMN decision_reason TEXT"); } catch {}
+  try { db.exec("ALTER TABLE hermes_approvals ADD COLUMN approver_id TEXT NOT NULL DEFAULT 'owner'"); } catch {}
+  try { db.exec("ALTER TABLE hermes_approvals ADD COLUMN outcome_ref TEXT"); } catch {}
 
   // Secondary indexes for performance & fast query lookup
   try {
@@ -201,6 +293,29 @@ export function initDatabase(db: DatabaseSync) {
       CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(ts);
       CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
       CREATE INDEX IF NOT EXISTS idx_memory_notes_pinned ON memory_notes(pinned);
+      CREATE INDEX IF NOT EXISTS idx_hermes_runs_conv ON hermes_runs(conversation_id);
+      CREATE INDEX IF NOT EXISTS idx_hermes_runs_status ON hermes_runs(status);
+      CREATE INDEX IF NOT EXISTS idx_hermes_runs_user ON hermes_runs(user_id);
+      CREATE INDEX IF NOT EXISTS idx_hermes_runs_hermes_id ON hermes_runs(hermes_run_id);
+      CREATE INDEX IF NOT EXISTS idx_hermes_approvals_run ON hermes_approvals(run_id);
+      CREATE INDEX IF NOT EXISTS idx_hermes_approvals_hermes_run ON hermes_approvals(hermes_run_id);
+      CREATE INDEX IF NOT EXISTS idx_hermes_approvals_status ON hermes_approvals(status);
+      CREATE INDEX IF NOT EXISTS idx_hermes_approvals_hash ON hermes_approvals(action_hash);
+      CREATE INDEX IF NOT EXISTS idx_audit_log_seq ON execution_audit_log(seq);
+      CREATE INDEX IF NOT EXISTS idx_audit_log_run ON execution_audit_log(run_id);
+      CREATE INDEX IF NOT EXISTS idx_audit_log_event ON execution_audit_log(event_type);
+
+      CREATE TRIGGER IF NOT EXISTS trg_audit_log_prevent_update
+      BEFORE UPDATE ON execution_audit_log
+      BEGIN
+        SELECT RAISE(ABORT, 'execution_audit_log is append-only: UPDATE operations are strictly prohibited');
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS trg_audit_log_prevent_delete
+      BEFORE DELETE ON execution_audit_log
+      BEGIN
+        SELECT RAISE(ABORT, 'execution_audit_log is append-only: DELETE operations are strictly prohibited');
+      END;
     `);
   } catch {}
 

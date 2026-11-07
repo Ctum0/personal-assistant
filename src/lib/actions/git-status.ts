@@ -1,13 +1,21 @@
-import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 
 export async function run(_args?: any): Promise<{ ok: boolean; output: string; pane?: any }> {
   try {
-    const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
-    const status = execSync('git status --short', { encoding: 'utf8' }).trim();
-    const lastCommit = execSync('git log -1 --oneline', { encoding: 'utf8' }).trim();
-
-    const output = `Branch: ${branch}\nLast Commit: ${lastCommit}\n${status ? `Changes:\n${status}` : 'Working tree clean'}`;
-
+    const gitDir = path.join(process.cwd(), '.git');
+    if (!fs.existsSync(gitDir)) {
+      return { ok: true, output: 'Not a git repository or running inside container deployment' };
+    }
+    const headFile = path.join(gitDir, 'HEAD');
+    let branch = 'unknown';
+    if (fs.existsSync(headFile)) {
+      const headContent = fs.readFileSync(headFile, 'utf8').trim();
+      branch = headContent.startsWith('ref: refs/heads/')
+        ? headContent.replace('ref: refs/heads/', '')
+        : headContent.slice(0, 8);
+    }
+    const output = `Branch: ${branch}\nRepository verified safely without shell execution`;
     return {
       ok: true,
       output,
@@ -17,13 +25,13 @@ export async function run(_args?: any): Promise<{ ok: boolean; output: string; p
         title: `Git Status (${branch})`,
         data: {
           entries: [
-            { time: 'HEAD', app: 'git', title: lastCommit },
-            { time: 'Status', app: 'git', title: status ? `${status.split('\n').length} modified file(s)` : 'Clean tree' },
+            { time: 'Branch', app: 'git', title: branch },
           ],
         },
       },
     };
   } catch (err: any) {
-    return { ok: false, output: `Git status failed: ${err.message}` };
+    return { ok: false, output: `Git status check failed: ${err.message}` };
   }
 }
+

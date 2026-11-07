@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/db';
 import { processSofiaChatTurn } from '@/lib/brain';
+import { verifyApiAuth } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
+
     const db = getDatabase();
     const body = await req.json();
 
@@ -15,16 +21,17 @@ export async function POST(req: NextRequest) {
       const userText = body.userMessage || body.message || '';
       const assistantText = body.assistantMessage || '';
       const mood = body.mood || 'neutral';
+      const runId = body.runId || body.run_id || null;
 
       if (userText.trim()) {
         db.prepare(
-          'INSERT INTO messages (id, ts, role, content, session_id, channel) VALUES (?, ?, ?, ?, ?, ?)'
-        ).run(`msg-${Date.now()}-u`, new Date().toISOString(), 'user', userText, sessionId, channel);
+          'INSERT INTO messages (id, ts, role, content, session_id, channel, run_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        ).run(`msg-${Date.now()}-u`, new Date().toISOString(), 'user', userText, sessionId, channel, runId);
       }
 
       if (assistantText.trim()) {
         db.prepare(
-          'INSERT INTO messages (id, ts, role, content, mood, session_id, channel) VALUES (?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO messages (id, ts, role, content, mood, session_id, channel, run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           `msg-${Date.now()}-a`,
           new Date().toISOString(),
@@ -32,7 +39,8 @@ export async function POST(req: NextRequest) {
           assistantText,
           mood,
           sessionId,
-          channel
+          channel,
+          runId
         );
       }
 
@@ -40,7 +48,7 @@ export async function POST(req: NextRequest) {
     }
 
     const userMessage = body.message || '';
-    const history = body.history || [];
+    let history = Array.isArray(body.history) ? body.history : [];
 
     if (!userMessage.trim()) {
       return NextResponse.json({ error: 'Message cannot be empty' }, { status: 400 });
@@ -58,11 +66,30 @@ export async function POST(req: NextRequest) {
       channel
     );
 
-    const result = await processSofiaChatTurn(db, userMessage, history);
+    // If client did not provide history, load recent messages from SQLite database for this session!
+    if (history.length === 0) {
+      try {
+        const rows = db
+          .prepare(
+            'SELECT role, content FROM messages WHERE session_id = ? ORDER BY ts DESC LIMIT 8'
+          )
+          .all(sessionId) as Array<{ role: 'user' | 'assistant'; content: string }>;
+        // Exclude the current message we just inserted (first row in DESC)
+        const pastRows = rows.slice(1).reverse();
+        history = pastRows.map((r) => ({
+          role: r.role,
+          content: r.content,
+        }));
+      } catch (err) {
+        console.warn('Failed to load past conversation context from DB:', err);
+      }
+    }
 
-    // Save Sofia's reply
+    const result = await processSofiaChatTurn(db, userMessage, history, { sessionId, channel });
+
+    // Save Sofia's reply with linked run_id
     db.prepare(
-      'INSERT INTO messages (id, ts, role, content, mood, tool_calls, session_id, channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO messages (id, ts, role, content, mood, tool_calls, session_id, channel, run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(
       `msg-${Date.now()}-a`,
       new Date().toISOString(),
@@ -71,7 +98,8 @@ export async function POST(req: NextRequest) {
       result.mood,
       result.toolCalls ? JSON.stringify(result.toolCalls) : null,
       sessionId,
-      channel
+      channel,
+      result.runId || null
     );
 
     return NextResponse.json(result);
@@ -83,6 +111,11 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
+
     const db = getDatabase();
     const sessionId = req.nextUrl.searchParams.get('sessionId');
 
@@ -95,18 +128,19 @@ export async function GET(req: NextRequest) {
       tool_calls: string | null;
       session_id?: string;
       channel?: string;
+      run_id?: string | null;
     }>;
 
     if (sessionId) {
       rows = db
         .prepare(
-          'SELECT id, ts, role, content, mood, tool_calls, session_id, channel FROM messages WHERE session_id = ? ORDER BY ts DESC LIMIT 30'
+          'SELECT id, ts, role, content, mood, tool_calls, session_id, channel, run_id FROM messages WHERE session_id = ? ORDER BY ts DESC LIMIT 30'
         )
         .all(sessionId) as any;
     } else {
       rows = db
         .prepare(
-          'SELECT id, ts, role, content, mood, tool_calls, session_id, channel FROM messages ORDER BY ts DESC LIMIT 30'
+          'SELECT id, ts, role, content, mood, tool_calls, session_id, channel, run_id FROM messages ORDER BY ts DESC LIMIT 30'
         )
         .all() as any;
     }
@@ -121,6 +155,7 @@ export async function GET(req: NextRequest) {
           mood: r.mood,
           session_id: r.session_id || 'default',
           channel: r.channel || 'chat',
+          run_id: r.run_id || null,
           tool_calls: r.tool_calls ? JSON.parse(r.tool_calls) : undefined,
         }))
         .reverse()

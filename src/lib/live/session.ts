@@ -81,6 +81,7 @@ export class SofiaLiveSession {
   private textSpokenSoFar = '';
   private userCaption = '';
   private modelCaption = '';
+  private lastRunId: string | null = null;
 
   // Connection & telemetry
   private resumptionHandle: string | null = null;
@@ -99,9 +100,14 @@ export class SofiaLiveSession {
   private lastTtft: number | null = null;
 
   private callbacks: LiveSessionCallbacks = {};
+  private conversationId: string = 'default';
 
-  constructor(callbacks: LiveSessionCallbacks = {}) {
+  constructor(callbacks: LiveSessionCallbacks = {}, conversationId?: string) {
     this.callbacks = callbacks;
+    if (conversationId) {
+      this.sessionId = conversationId;
+      this.conversationId = conversationId;
+    }
   }
 
   public getState(): LiveConnState {
@@ -203,7 +209,11 @@ export class SofiaLiveSession {
       }
 
       // 2. Mint ephemeral token & fetch live connect configuration
-      const tokenRes = await fetch('/api/live/token', { method: 'POST', headers: getAuthHeaders() });
+      const tokenRes = await fetch('/api/live/token', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ conversationId: this.conversationId }),
+      });
       if (!tokenRes.ok) {
         const errJson = await tokenRes.json().catch(() => ({}));
         throw new Error(errJson.error || `Token mint failed (${tokenRes.status})`);
@@ -362,6 +372,7 @@ export class SofiaLiveSession {
       if (this.modelCaption.trim() || this.userCaption.trim()) {
         const uText = this.userCaption.trim();
         const mText = this.modelCaption.trim();
+        const runIdToPersist = this.lastRunId;
         fetch('/api/chat', {
           method: 'POST',
           headers: getAuthHeaders(),
@@ -371,8 +382,10 @@ export class SofiaLiveSession {
             sessionId: this.sessionId,
             userMessage: uText || '(Spoken voice input)',
             assistantMessage: mText,
+            runId: runIdToPersist,
           }),
         }).catch((err) => console.warn('Failed to persist live voice turn:', err));
+        this.lastRunId = null;
       }
     }
 
@@ -398,7 +411,12 @@ export class SofiaLiveSession {
         const res = await fetch('/api/live/tool', {
           method: 'POST',
           headers: getAuthHeaders(),
-          body: JSON.stringify({ name: fc.name, args: fc.args }),
+          body: JSON.stringify({
+            name: fc.name,
+            args: fc.args,
+            conversationId: this.conversationId,
+            sessionId: this.sessionId,
+          }),
         });
 
         const data = await res.json();
@@ -407,6 +425,9 @@ export class SofiaLiveSession {
         }
         if (data.mood) {
           this.callbacks.onMood?.(data.mood);
+        }
+        if (data.result?.sofia_run_id || data.result?.run_id) {
+          this.lastRunId = data.result.sofia_run_id || data.result.run_id;
         }
 
         responses.push({

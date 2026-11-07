@@ -18,7 +18,7 @@ export interface LiveConfig {
   };
 }
 
-export function getLiveConfig(db: DatabaseSync): LiveConfig {
+export function getLiveConfig(db: DatabaseSync, conversationId?: string): LiveConfig {
   const modalities =
     (process.env.SOFIA_LIVE_MODALITIES ?? 'AUDIO') === 'TEXT' ? ['TEXT'] : ['AUDIO'];
 
@@ -26,7 +26,7 @@ export function getLiveConfig(db: DatabaseSync): LiveConfig {
     model: process.env.SOFIA_LIVE_MODEL ?? 'gemini-2.0-flash-exp',
     voice: process.env.SOFIA_LIVE_VOICE ?? 'Aoede',
     modalities,
-    systemPrompt: buildVoicePersona(db),
+    systemPrompt: buildVoicePersona(db, conversationId),
     functionDeclarations: buildGeminiFunctionDeclarations(),
     realtimeInputConfig: {
       automaticActivityDetection: {

@@ -47,4 +47,5 @@ data/*.db-wal
 data/*.db-shm
 data/audio/
 data/backups/
+.artifacts/
 

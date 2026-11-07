@@ -1,7 +1,13 @@
 import { NextRequest } from 'next/server';
 import { getDatabase, getDayScore, getDayStats } from '@/lib/db';
+import { verifyApiAuth } from '@/lib/auth';
 
 export async function GET(req: NextRequest) {
+  const auth = verifyApiAuth(req);
+  if (!auth.authorized) {
+    return auth.response!;
+  }
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({

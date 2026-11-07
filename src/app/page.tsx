@@ -10,6 +10,7 @@ import { SofiaExpression } from '@/lib/types';
 import { getExpressionFromMood } from '@/lib/expressions';
 import { speakSofia, stopSpeaking, unlockAudio } from '@/lib/voice';
 import { SofiaLiveSession, LiveConnState } from '@/lib/live/session';
+import { useVoiceInput } from '@/hooks/useVoiceInput';
 import {
   Mic,
   PhoneOff,
@@ -30,6 +31,12 @@ import {
   Headphones,
 } from 'lucide-react';
 
+function getAuthHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('sofia_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export default function SofiaStageHome() {
   const [expression, setExpression] = useState<SofiaExpression>('focused');
   const [moodLabel, setMoodLabel] = useState('Focused');
@@ -38,6 +45,7 @@ export default function SofiaStageHome() {
   );
   const [userCaption, setUserCaption] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [conversationId, setConversationId] = useState<string>('conv_main');
   const [liveState, setLiveState] = useState<LiveState>('off');
   const [mouthOpen, setMouthOpen] = useState(0);
   const [micLevel, setMicLevel] = useState(0);
@@ -52,6 +60,181 @@ export default function SofiaStageHome() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
 
+  // Initialize or restore canonical conversation identity from localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      let stored = localStorage.getItem('sofia_conversation_id');
+      if (!stored) {
+        stored = `conv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        localStorage.setItem('sofia_conversation_id', stored);
+      }
+      setConversationId(stored);
+
+      // Rehydrate active browser session for this conversation if present
+      fetch(`/api/browser/sessions?conversation_id=${encodeURIComponent(stored)}`, {
+        headers: getAuthHeaders(),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.sessions && data.sessions.length > 0) {
+            const activeSess = data.sessions[0];
+            setPanes((prev) => {
+              if (prev.some((p) => p.kind === 'browser')) return prev;
+              return [
+                {
+                  id: `pane-browser-${activeSess.id}`,
+                  title: activeSess.title,
+                  kind: 'browser',
+                  session_id: activeSess.id,
+                  url: activeSess.current_url,
+                  lease_holder: activeSess.lease_holder,
+                  status: activeSess.status,
+                },
+                ...prev,
+              ];
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  // Single-Brain Voice Input (Transcription-First -> Hermes -> Edge TTS)
+  const {
+    isListening: isVoiceListening,
+    voiceState,
+    interimTranscript: voiceInterim,
+    error: voiceError,
+    startListening: startVoiceInput,
+    stopListening: stopVoiceInput,
+    injectTranscript: injectVoiceTranscript,
+    setVoiceState,
+  } = useVoiceInput({
+    onFinalTranscript: (transcript) => {
+      if (transcript.trim()) {
+        handleSendMessage(transcript.trim(), 'voice');
+      }
+    },
+    silenceTimeoutMs: 1400,
+  });
+
+  // Expose test harness on window for automated browser voice testing
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__sofiaVoiceHarness = {
+        injectTranscript: injectVoiceTranscript,
+        startVoiceInput,
+        stopVoiceInput,
+        voiceState,
+        isVoiceListening,
+        speakSofia,
+        stopSpeaking,
+      };
+    }
+  }, [injectVoiceTranscript, startVoiceInput, stopVoiceInput, voiceState, isVoiceListening]);
+
+  // Handle voice error notification
+  useEffect(() => {
+    if (voiceError) {
+      setCaptionText(voiceError);
+      setExpression('concerned');
+    }
+  }, [voiceError]);
+
+  // Reflect interim voice transcription in the user caption
+  useEffect(() => {
+    if (isVoiceListening && voiceInterim) {
+      setUserCaption(voiceInterim);
+    }
+  }, [isVoiceListening, voiceInterim]);
+
+  // Synchronize avatar liveState with voice & speaking activity
+  useEffect(() => {
+    if (isSpeaking) {
+      setLiveState('speaking');
+    } else if (isSending) {
+      setLiveState('thinking');
+    } else if (isVoiceListening) {
+      setLiveState('listening');
+    } else if (liveSessionRef.current) {
+      // Kept by duplex session callbacks if active
+    } else {
+      setLiveState('off');
+    }
+  }, [isSpeaking, isSending, isVoiceListening]);
+
+  // Rehydrate active Hermes tasks on load or conversation restore
+  useEffect(() => {
+    if (!conversationId) return;
+
+    fetch(`/api/hermes/runs?conversation_id=${encodeURIComponent(conversationId)}&limit=10`, {
+      headers: getAuthHeaders(),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.runs)) {
+          const activeRuns = data.runs.filter((r: any) =>
+            ['running', 'started', 'queued'].includes(r.status)
+          );
+          if (activeRuns.length > 0) {
+            setPanes((prev) => {
+              const existingRunIds = new Set(prev.map((p) => p.run_id));
+              const newPanes: Pane[] = activeRuns
+                .filter((r: any) => !existingRunIds.has(r.hermes_run_id))
+                .map((r: any) => ({
+                  id: `pane-rehydrated-${r.hermes_run_id}`,
+                  title: `Hermes: Active Task`,
+                  kind: 'code' as const,
+                  language: 'bash',
+                  run_id: r.hermes_run_id,
+                  status: r.status,
+                  code: `Task in progress on Hermes (Run ID: ${r.hermes_run_id})\nPrompt: ${r.prompt.slice(0, 80)}`,
+                }));
+              return [...prev, ...newPanes];
+            });
+          }
+        }
+      })
+      .catch((err) => console.warn('Failed to rehydrate active runs:', err));
+
+    // Rehydrate pending approvals on load or conversation restore
+    fetch(`/api/hermes/approvals?conversation_id=${encodeURIComponent(conversationId)}&status=pending`, {
+      headers: getAuthHeaders(),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.approvals)) {
+          const pending = data.approvals;
+          if (pending.length > 0) {
+            setPanes((prev) => {
+              const existingApprIds = new Set(
+                prev.filter((p) => p.kind === 'approval').map((p) => (p as any).approval_id)
+              );
+              const newPanes: Pane[] = pending
+                .filter((a: any) => !existingApprIds.has(a.id))
+                .map((a: any) => ({
+                  id: `pane-approval-${a.id}`,
+                  title: `Approval Required: ${a.tool_name}`,
+                  kind: 'approval' as const,
+                  approval_id: a.id,
+                  run_id: a.run_id,
+                  tool_name: a.tool_name,
+                  risk_level: a.risk_level,
+                  target: a.arguments?.path || a.arguments?.command || a.arguments?.url || a.tool_name,
+                  preview: a.preview_json,
+                  action_hash: a.action_hash,
+                  reason: a.reason || `Approval requested for ${a.tool_name}`,
+                  expires_at: a.expires_at,
+                  status: a.status,
+                }));
+              return [...prev, ...newPanes];
+            });
+          }
+        }
+      })
+      .catch((err) => console.warn('Failed to rehydrate pending approvals:', err));
+  }, [conversationId]);
+
   // Debug metrics
   const [debugMetrics, setDebugMetrics] = useState<DebugMetrics>({
     ttfa: null,
@@ -60,8 +243,8 @@ export default function SofiaStageHome() {
     sessionDuration: 0,
     reconnectCount: 0,
     dropCount: 0,
-    model: 'gemini-3.8-live',
-    voice: 'Aoede',
+    model: 'hermes-3-llama-3.1',
+    voice: 'AvaNeural (Edge TTS)',
     state: 'off',
     micRms: 0,
   });
@@ -159,6 +342,22 @@ export default function SofiaStageHome() {
     };
   }, [liveState]);
 
+  // Single-Brain Voice Toggle (Transcription-First -> Hermes -> Edge TTS)
+  const toggleVoiceMode = useCallback(async () => {
+    unlockAudio();
+    if (isVoiceListening) {
+      stopVoiceInput();
+      setLiveState('off');
+    } else {
+      if (liveSessionRef.current) {
+        liveSessionRef.current.stop();
+        liveSessionRef.current = null;
+      }
+      stopSpeaking();
+      await startVoiceInput();
+    }
+  }, [isVoiceListening, startVoiceInput, stopVoiceInput]);
+
   // Handle Talk / Hang up Toggle
   const toggleLiveVoice = useCallback(async () => {
     unlockAudio();
@@ -239,13 +438,13 @@ export default function SofiaStageHome() {
         );
         setLiveState('error');
       },
-    });
+    }, conversationId);
 
     liveSessionRef.current = session;
     await session.start();
-  }, []);
+  }, [conversationId]);
 
-  const handleSendMessage = async (textToSend?: string) => {
+  const handleSendMessage = async (textToSend?: string, channel: 'chat' | 'voice' = 'chat') => {
     const text = (textToSend || inputText).trim();
     if (!text || isSending) return;
 
@@ -254,20 +453,13 @@ export default function SofiaStageHome() {
     setUserCaption(text);
     unlockAudio();
 
-    // If live session is currently connected, forward text directly to Gemini Live
-    if (liveSessionRef.current && liveState !== 'off') {
-      liveSessionRef.current.sendTextMessage(text);
-      return;
-    }
-
-    // Otherwise use standard text API route
     setIsSending(true);
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ message: text, sessionId: conversationId, channel }),
       });
 
       if (!res.ok) {
@@ -335,6 +527,223 @@ export default function SofiaStageHome() {
       setIsSending(false);
     }
   };
+
+  // Active Hermes task streaming & polling effect
+  useEffect(() => {
+    const activePanes = panes.filter(
+      (p) => p.run_id && (p.status === 'running' || p.status === 'started' || p.status === 'queued')
+    );
+    if (activePanes.length === 0) return;
+
+    let isMounted = true;
+    const abortControllers = new Map<string, AbortController>();
+
+    // Subscribe to real-time SSE run events (tool started, subagent start, message deltas)
+    for (const p of activePanes) {
+      if (!p.run_id || abortControllers.has(p.run_id)) continue;
+      const controller = new AbortController();
+      abortControllers.set(p.run_id, controller);
+
+      (async () => {
+        try {
+          const res = await fetch(`/api/hermes/runs/${encodeURIComponent(p.run_id!)}/events`, {
+            headers: getAuthHeaders(),
+            signal: controller.signal,
+          });
+          if (!res.ok || !res.body) return;
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (isMounted) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            let currentEvent = 'message';
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed.startsWith('event:')) {
+                currentEvent = trimmed.slice(6).trim();
+              } else if (trimmed.startsWith('data:')) {
+                const dataRaw = trimmed.slice(5).trim();
+                let parsedData: any = dataRaw;
+                try {
+                  parsedData = JSON.parse(dataRaw);
+                } catch {}
+
+                if (currentEvent === 'tool.started') {
+                  const toolName = parsedData?.name || parsedData?.tool || 'tool';
+                  setPanes((prev) =>
+                    prev.map((item) =>
+                      item.run_id === p.run_id
+                        ? ({ ...item, status: 'running', title: `Hermes: Running ${toolName}...` } as Pane)
+                        : item
+                    )
+                  );
+                } else if (currentEvent === 'subagent.start') {
+                  const subRole = parsedData?.role || parsedData?.name || 'Subagent';
+                  setPanes((prev) =>
+                    prev.map((item) =>
+                      item.run_id === p.run_id
+                        ? ({ ...item, status: 'running', title: `Hermes: Delegating to ${subRole}...` } as Pane)
+                        : item
+                    )
+                  );
+                } else if (currentEvent === 'message.delta' || currentEvent === 'message.interim') {
+                  const delta = typeof parsedData === 'string' ? parsedData : parsedData?.content || parsedData?.delta || '';
+                  if (delta) {
+                    setPanes((prev) =>
+                      prev.map((item) => {
+                        if (item.run_id === p.run_id) {
+                          const currentCode = (item as any).code || '';
+                          return {
+                            ...item,
+                            kind: 'code' as const,
+                            language: (item as any).language || 'markdown',
+                            code: currentCode.endsWith(delta) ? currentCode : currentCode + delta,
+                          } as Pane;
+                        }
+                        return item;
+                      })
+                    );
+                  }
+                } else if (['run.completed', 'run.failed', 'run.interrupted'].includes(currentEvent)) {
+                  const status = currentEvent === 'run.completed' ? 'completed' : currentEvent === 'run.interrupted' ? 'waiting_approval' : 'failed';
+                  const output = parsedData?.output || parsedData?.error || '';
+                  setPanes((prev) =>
+                    prev.map((item) =>
+                      item.run_id === p.run_id
+                        ? ({
+                            ...item,
+                            kind: 'code' as const,
+                            language: (item as any).language || 'markdown',
+                            status,
+                            title: `Hermes: ${status === 'completed' ? 'Task Completed' : status === 'waiting_approval' ? 'Waiting Approval' : 'Task Failed'}`,
+                            code: output || (item as any).code || '',
+                          } as Pane)
+                        : item
+                    )
+                  );
+
+                  if (currentEvent === 'run.interrupted') {
+                    fetch(`/api/hermes/approvals?conversation_id=${encodeURIComponent(conversationId)}&status=pending`, {
+                      headers: getAuthHeaders(),
+                    })
+                      .then((res) => (res.ok ? res.json() : null))
+                      .then((apprData) => {
+                        if (apprData && Array.isArray(apprData.approvals)) {
+                          const pending = apprData.approvals;
+                          if (pending.length > 0) {
+                            setPanes((prev) => {
+                              const existingApprIds = new Set(
+                                prev.filter((it) => it.kind === 'approval').map((it) => (it as any).approval_id)
+                              );
+                              const newApprPanes: Pane[] = pending
+                                .filter((a: any) => !existingApprIds.has(a.id))
+                                .map((a: any) => ({
+                                  id: `pane-approval-${a.id}`,
+                                  title: `Approval Required: ${a.tool_name}`,
+                                  kind: 'approval' as const,
+                                  approval_id: a.id,
+                                  run_id: a.run_id,
+                                  tool_name: a.tool_name,
+                                  risk_level: a.risk_level,
+                                  target: a.arguments?.path || a.arguments?.command || a.arguments?.url || a.tool_name,
+                                  preview: a.preview_json,
+                                  action_hash: a.action_hash,
+                                  reason: a.reason || `Approval requested for ${a.tool_name}`,
+                                  expires_at: a.expires_at,
+                                  status: a.status,
+                                }));
+                              return [...prev, ...newApprPanes];
+                            });
+                          }
+                        }
+                      })
+                      .catch(() => {});
+                  }
+                }
+              }
+            }
+          }
+        } catch (err: any) {
+          if (err.name !== 'AbortError') {
+            console.debug('Run SSE stream notice:', err);
+          }
+        }
+      })();
+    }
+
+    // Polling fallback loop ensures completion even if SSE connection drops
+    const pollInterval = setInterval(async () => {
+      for (const p of activePanes) {
+        if (!p.run_id) continue;
+        try {
+          const res = await fetch(`/api/hermes/runs/${encodeURIComponent(p.run_id)}`, {
+            headers: getAuthHeaders(),
+          });
+          if (!res.ok) continue;
+          const runData = await res.json();
+          if (!isMounted) break;
+
+          if (['completed', 'failed', 'stopped'].includes(runData.status)) {
+            // Update matching pane in state
+            setPanes((prev) =>
+              prev.map((existing) => {
+                if (existing.id === p.id || existing.run_id === p.run_id) {
+                  const finalOutput = runData.output || runData.error || `Status: ${runData.status}`;
+                  return {
+                    ...existing,
+                    status: runData.status,
+                    title: `Hermes: ${runData.status === 'completed' ? 'Task Completed' : 'Task ' + runData.status}`,
+                    code: finalOutput,
+                  } as Pane;
+                }
+                return existing;
+              })
+            );
+
+            // Announce completion to user through caption and persist to conversation messages
+            if (runData.status === 'completed') {
+              const sayText = "I've completed that task on Hermes. The result is on your Stage.";
+              setCaptionText(sayText);
+              setExpression('pleased');
+              fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                body: JSON.stringify({
+                  persistOnly: true,
+                  channel: 'system',
+                  sessionId: conversationId,
+                  assistantMessage: `${sayText}\n\n${runData.output || ''}`,
+                  mood: 'pleased',
+                  runId: p.run_id,
+                }),
+              }).catch(() => {});
+            } else if (runData.status === 'failed') {
+              const sayText = `That task encountered an error: ${runData.error || 'Execution failed'}`;
+              setCaptionText(sayText);
+              setExpression('concerned');
+            }
+          }
+        } catch (err) {
+          console.warn('Run polling error:', err);
+        }
+      }
+    }, 2500);
+
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+      for (const ctrl of abortControllers.values()) {
+        ctrl.abort();
+      }
+    };
+  }, [panes, conversationId]);
 
   // Global keyboard shortcuts (Esc flushes audio, Cmd+K focuses input)
   useEffect(() => {
@@ -601,25 +1010,40 @@ export default function SofiaStageHome() {
 
         {/* Unified Input Dock Bar */}
         <div className="relative flex items-center space-x-2 p-1.5 rounded-2xl glass-panel border border-burgundy-700/50 shadow-[0_8px_32px_rgba(20,3,10,0.8)]">
-          {/* Full Duplex Talk / Hang up Button */}
+          {/* Single-Brain Hermes Voice Talk / Stop Button */}
           <button
-            onClick={toggleLiveVoice}
-            aria-label={liveState !== 'off' ? 'Hang up live voice call' : 'Start live voice call'}
+            onClick={toggleVoiceMode}
+            aria-label={isVoiceListening ? 'Stop listening' : 'Start voice conversation'}
             title={
-              liveState !== 'off'
-                ? 'Hang up (ends duplex live session)'
-                : 'Talk (starts Gemini 3.8 Live bidirectional session)'
+              isVoiceListening
+                ? 'Stop listening (dispatches transcript to Hermes)'
+                : 'Talk to Sofia (Hermes Authoritative Voice)'
             }
             className={`px-4 py-3 rounded-xl transition-all flex items-center justify-center space-x-2 shrink-0 min-w-[105px] min-h-[44px] ${
-              liveState !== 'off'
+              isVoiceListening
                 ? 'bg-gradient-to-r from-red-800 to-rose-900 hover:from-red-700 hover:to-rose-800 text-white shadow-[0_0_20px_rgba(225,29,72,0.6)] animate-pulse'
                 : 'bg-gradient-to-r from-rose-600 to-crimson-600 hover:from-rose-500 hover:to-crimson-500 text-white shadow-[0_0_15px_rgba(225,29,72,0.4)]'
             }`}
           >
-            {liveState !== 'off' ? (
+            {isSpeaking ? (
+              <>
+                <Volume2 className="w-4 h-4 text-rose-200 animate-pulse" />
+                <span className="text-xs font-bold font-mono tracking-wider">Speaking</span>
+              </>
+            ) : voiceState === 'requesting' ? (
+              <>
+                <Mic className="w-4 h-4 text-amber-200 animate-pulse" />
+                <span className="text-xs font-bold font-mono tracking-wider">Requesting...</span>
+              </>
+            ) : voiceState === 'transcribing' ? (
+              <>
+                <Sparkles className="w-4 h-4 text-rose-200 animate-spin" />
+                <span className="text-xs font-bold font-mono tracking-wider">Transcribing...</span>
+              </>
+            ) : isVoiceListening ? (
               <>
                 <PhoneOff className="w-4 h-4 text-rose-200" />
-                <span className="text-xs font-bold font-mono tracking-wider">Hang up</span>
+                <span className="text-xs font-bold font-mono tracking-wider">Listening</span>
               </>
             ) : (
               <>

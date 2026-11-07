@@ -5,9 +5,14 @@ import {
   synthesizeElevenLabs,
   elevenLabsBudgetLeft,
 } from '@/lib/tts';
+import { verifyApiAuth } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
     const body = await req.json().catch(() => ({}));
     const text = typeof body.text === 'string' ? body.text.trim() : '';
 

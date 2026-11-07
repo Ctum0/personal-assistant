@@ -130,20 +130,19 @@ describe('Brain Subsystem', () => {
   it('has all typed tools defined in SOFIA_TOOLS', () => {
     const toolNames = SOFIA_TOOLS.map((t) => t.function.name);
     expect(toolNames).toContain('get_stats');
-    expect(toolNames).toContain('get_timeline');
+    expect(toolNames).toContain('show_timeline');
     expect(toolNames).toContain('search_memory');
     expect(toolNames).toContain('list_tasks');
     expect(toolNames).toContain('create_task');
     expect(toolNames).toContain('complete_task');
-    expect(toolNames).toContain('start_focus_session');
+    expect(toolNames).toContain('start_focus');
     expect(toolNames).toContain('set_reminder');
-    expect(toolNames).toContain('request_consequence');
-    expect(toolNames).toContain('browse_url');
     expect(toolNames).toContain('show_image');
+    expect(toolNames).toContain('ask_hermes');
   });
 
-  it('executes get_stats tool cleanly and yields a pane', () => {
-    const res = executeSofiaTool(db, 'get_stats', { range: 'day' }, defaultSettings);
+  it('executes get_stats tool cleanly and yields a pane', async () => {
+    const res = await executeSofiaTool(db, 'get_stats', { range: 'day' }, defaultSettings);
     expect(res.error).toBeUndefined();
     expect(res.result).toBeDefined();
     expect(res.result.stats.commits).toBe(8);

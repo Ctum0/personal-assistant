@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase, ingestEvents, rebuildDayStats } from '@/lib/db';
+import { verifyApiAuth } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
-    const requiredToken = process.env.DEVICE_TOKEN;
-    if (requiredToken) {
-      const token = req.headers.get('x-device-token');
-      if (token !== requiredToken) {
-        return NextResponse.json({ error: 'unauthorized_device_token' }, { status: 401 });
-      }
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
     }
 
     const db = getDatabase();

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyApiAuth } from '@/lib/auth';
 
 function isSsrfSafeUrl(rawUrl: string): boolean {
   try {
@@ -40,6 +41,10 @@ function isSsrfSafeUrl(rawUrl: string): boolean {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
     const body = await req.json().catch(() => ({}));
     const rawUrl = typeof body.url === 'string' ? body.url.trim() : '';
 

@@ -61,15 +61,15 @@ describe('Gemini 3.8 Live & Machine Control (Sofia v6)', () => {
 
     it('generates valid Gemini Live function declarations', () => {
       const decls = buildGeminiFunctionDeclarations();
-      expect(decls.length).toBeGreaterThan(20);
-      const screenshotTool = decls.find((d) => d.name === 'computer_screenshot');
-      expect(screenshotTool).toBeDefined();
-      expect(screenshotTool?.parameters.type).toBe('OBJECT');
+      expect(decls.length).toBeGreaterThanOrEqual(16);
+      const statsTool = decls.find((d) => d.name === 'get_stats');
+      expect(statsTool).toBeDefined();
+      expect(statsTool?.parameters.type).toBe('OBJECT');
     });
 
     it('generates valid OpenAI format tools', () => {
       const openAiTools = buildOpenAITools();
-      expect(openAiTools.length).toBeGreaterThan(20);
+      expect(openAiTools.length).toBeGreaterThanOrEqual(16);
       const first = openAiTools[0];
       expect(first.type).toBe('function');
       expect(first.function.name).toBeDefined();
@@ -106,16 +106,15 @@ describe('Gemini 3.8 Live & Machine Control (Sofia v6)', () => {
   });
 
   describe('Tool Execution & Stage Panes', () => {
-    it('executes hermes_schedule_create and produces a stat pane', async () => {
+    it('enforces security barrier: computer_run rejects direct container shell execution', async () => {
       const res = await executeTool(
         testDb,
-        'hermes_schedule_create',
-        { name: 'Daily Standup', cron: '0 9 * * *', command: 'echo standup' },
+        'computer_run',
+        { command: 'whoami' },
         defaultSettings
       );
-      expect(res.result?.created).toBe(true);
-      expect(res.pane?.kind).toBe('stat');
-      expect(res.pane?.title).toContain('Daily Standup');
+      expect(res.error).toContain('Direct shell execution is disabled in the Sofia web application container');
+      expect(res.mood).toBe('stern');
     });
 
     it('executes hermes_schedule_list and returns table pane', async () => {

@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/db';
 import { MemoryNote } from '@/lib/types';
+import { verifyApiAuth } from '@/lib/auth';
 
 export async function GET(req: NextRequest) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
     const db = getDatabase();
     const { searchParams } = new URL(req.url);
     const query = searchParams.get('q') || '';
@@ -36,6 +41,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
     const db = getDatabase();
     const body = await req.json();
     const text = (body.text || '').trim();
@@ -64,6 +73,10 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
     const db = getDatabase();
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');

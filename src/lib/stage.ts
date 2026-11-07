@@ -13,6 +13,8 @@ export interface BasePane {
   title?: string;
   kind: string;
   pinned?: boolean;
+  run_id?: string;
+  status?: string;
 }
 
 export interface ChartDatum {
@@ -92,6 +94,29 @@ export interface CodePane extends BasePane {
   code: string;
 }
 
+export interface ApprovalPane extends BasePane {
+  kind: 'approval';
+  approval_id: string;
+  tool_name: string;
+  target?: string;
+  risk_level: 'R0' | 'R1' | 'R2' | 'R3';
+  preview: Record<string, any>;
+  reason: string;
+  expires_at: string;
+  action_hash?: string;
+  requires_strong_confirmation?: boolean;
+}
+
+export interface BrowserPane extends BasePane {
+  kind: 'browser';
+  session_id: string;
+  url: string;
+  title: string;
+  lease_holder: 'HUMAN' | 'AGENT';
+  status: 'active' | 'navigating' | 'closed' | 'error';
+  expanded?: boolean;
+}
+
 export type Pane =
   | ChartPane
   | StatPane
@@ -100,7 +125,9 @@ export type Pane =
   | WebPane
   | ImagePane
   | TodoPane
-  | CodePane;
+  | CodePane
+  | ApprovalPane
+  | BrowserPane;
 
 export interface SofiaTurn {
   say: string;

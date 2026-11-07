@@ -3,8 +3,31 @@ import { buildPersonaPrompt } from './persona';
 import { getDayScore, getDayStats, getSettings } from './db';
 import { SofiaExpression, SofiaSettings } from './types';
 import { evaluateConsequenceRequest } from './policy';
-import { Pane, SofiaTurn, SofiaMood } from './stage';
+import { Pane, SofiaTurn, SofiaMood, ApprovalPane } from './stage';
 import { executeTool, buildOpenAITools, buildGeminiFunctionDeclarations } from './tools';
+import { getHermesClient, getHermesConfig } from './hermes';
+import { registerRun, updateRunRecord, hashSessionKey, recordApprovalRequest } from './hermes/registry';
+import { buildHermesEphemeralInstructions, getNaturalProgressLine } from './persona.unified';
+
+export interface SofiaTurnResult {
+  text: string;
+  say: string;
+  mood: SofiaExpression;
+  panes?: Pane[];
+  toolCalls?: any[];
+  turn: SofiaTurn;
+  runId?: string;
+  sofiaRunId?: string;
+  isHermes?: boolean;
+  degraded?: boolean;
+  error?: string;
+}
+
+export interface BrainTurnOptions {
+  sessionId?: string;
+  channel?: string;
+  conversationId?: string;
+}
 
 export interface BrainTurnContext {
   now: string;
@@ -170,337 +193,36 @@ export function parseTurn(raw: string): SofiaTurn {
   }
 }
 
-// Tool definitions for OpenAI-compatible function calling
-export const SOFIA_TOOLS = [
-  {
-    type: 'function' as const,
-    function: {
-      name: 'get_stats',
-      description: 'Get activity minutes, commits, and scores for day, week, or month',
-      parameters: {
-        type: 'object',
-        properties: {
-          range: { type: 'string', enum: ['day', 'week', 'month'], description: 'Time range to query' },
-        },
-        required: ['range'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'get_timeline',
-      description: 'Get hour-by-hour breakdown of activities for a given date',
-      parameters: {
-        type: 'object',
-        properties: {
-          date: { type: 'string', description: 'YYYY-MM-DD date string' },
-        },
-        required: ['date'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'search_memory',
-      description: 'Search memory notes and summaries by keyword',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Search keyword' },
-        },
-        required: ['query'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'list_tasks',
-      description: 'List user tasks by status',
-      parameters: {
-        type: 'object',
-        properties: {
-          status: { type: 'string', enum: ['all', 'pending', 'in_progress', 'completed'] },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'create_task',
-      description: 'Create a new task item',
-      parameters: {
-        type: 'object',
-        properties: {
-          title: { type: 'string', description: 'Task title' },
-          est_min: { type: 'number', description: 'Estimated minutes' },
-        },
-        required: ['title'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'complete_task',
-      description: 'Mark a task as completed',
-      parameters: {
-        type: 'object',
-        properties: {
-          taskId: { type: 'string', description: 'ID of the task' },
-        },
-        required: ['taskId'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'start_focus_session',
-      description: 'Start a timed focus session with strict distraction monitoring',
-      parameters: {
-        type: 'object',
-        properties: {
-          minutes: { type: 'number', description: 'Target session length in minutes' },
-        },
-        required: ['minutes'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'set_reminder',
-      description: 'Set a future reminder or scheduled check-in',
-      parameters: {
-        type: 'object',
-        properties: {
-          at: { type: 'string', description: 'ISO timestamp or cron string' },
-          text: { type: 'string', description: 'Reminder text' },
-        },
-        required: ['at', 'text'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'request_consequence',
-      description: 'Request an accountability consequence rung. Policy module decides whether to approve, clamp, or reject.',
-      parameters: {
-        type: 'object',
-        properties: {
-          rung: { type: 'string', enum: ['words', 'friction', 'alarm', 'stakes', 'haptic', 'stimulus'] },
-          intensity: { type: 'number', description: 'Requested intensity 1-100' },
-          reason: { type: 'string', description: 'Fact-based justification' },
-        },
-        required: ['rung', 'intensity', 'reason'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'browse_url',
-      description: 'Fetch and extract reader summary and metadata from a web page',
-      parameters: {
-        type: 'object',
-        properties: {
-          url: { type: 'string', description: 'Web page URL to browse' },
-        },
-        required: ['url'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'show_image',
-      description: 'Project an image or graphic onto the companion Stage',
-      parameters: {
-        type: 'object',
-        properties: {
-          url: { type: 'string', description: 'Image URL or relative path' },
-          caption: { type: 'string', description: 'Optional descriptive caption' },
-        },
-        required: ['url'],
-      },
-    },
-  },
-];
+// Authoritative tool execution and schemas delegate to tools.ts
+export { executeTool as executeSofiaTool };
+export const SOFIA_TOOLS = buildOpenAITools();
 
-export function executeSofiaTool(
-  db: DatabaseSync,
-  name: string,
-  args: any,
-  settings: SofiaSettings
-): { result: any; pane?: Pane; error?: string } {
-  try {
-    const today = new Date().toISOString().slice(0, 10);
-
-    switch (name) {
-      case 'get_stats': {
-        const stats = getDayStats(db, today);
-        const score = getDayScore(db, today);
-        const leisurePct = stats.active_min > 0 ? Math.round((stats.leisure_min / stats.active_min) * 100) : 0;
-        const pane: Pane = {
-          id: `pane-stats-${Date.now()}`,
-          title: "Today's Telemetry",
-          kind: 'stat',
-          metrics: [
-            { label: 'Score', value: `${score.score.toFixed(0)} pts` },
-            { label: 'Commits', value: stats.commits },
-            { label: 'Focus Min', value: `${stats.work_min}m` },
-            { label: 'Leisure', value: `${leisurePct}%` },
-          ],
-        };
-        return { result: { stats, score }, pane };
-      }
-      case 'get_timeline': {
-        const rows = db
-          .prepare('SELECT ts, category, app, title, duration_s FROM events WHERE ts LIKE ? ORDER BY ts ASC')
-          .all(`${args.date || today}%`) as Array<{
-          ts: string;
-          category: string;
-          app: string;
-          title?: string;
-          duration_s: number;
-        }>;
-        const pane: Pane = {
-          id: `pane-timeline-${Date.now()}`,
-          title: 'Activity Timeline',
-          kind: 'timeline',
-          events: rows.slice(-6).map((r) => ({
-            time: r.ts.slice(11, 16),
-            title: r.title || r.app,
-            category: r.category,
-            duration: `${Math.round(r.duration_s / 60)}m`,
-          })),
-        };
-        return { result: rows, pane };
-      }
-      case 'search_memory': {
-        const query = `%${args.query || ''}%`;
-        const notes = db
-          .prepare('SELECT id, text, tags FROM memory_notes WHERE text LIKE ? ORDER BY pinned DESC LIMIT 5')
-          .all(query);
-        return { result: notes };
-      }
-      case 'list_tasks': {
-        let sql = 'SELECT id, title, status, est_min FROM tasks';
-        const params: any[] = [];
-        if (args.status && args.status !== 'all') {
-          sql += ' WHERE status = ?';
-          params.push(args.status);
-        }
-        sql += ' ORDER BY created_at DESC LIMIT 10';
-        const tasks = db.prepare(sql).all(...params) as Array<{
-          id: string;
-          title: string;
-          status: string;
-          est_min: number;
-        }>;
-        const pane: Pane = {
-          id: `pane-tasks-${Date.now()}`,
-          title: 'Active Tasks',
-          kind: 'todo',
-          items: tasks.map((t) => ({
-            id: t.id,
-            title: t.title,
-            done: t.status === 'completed',
-          })),
-        };
-        return { result: tasks, pane };
-      }
-      case 'create_task': {
-        const id = `task-${Date.now()}`;
-        const estMin = args.est_min || 30;
-        db.prepare(
-          'INSERT INTO tasks (id, title, status, est_min, created_at) VALUES (?, ?, ?, ?, ?)'
-        ).run(id, args.title, 'pending', estMin, new Date().toISOString());
-        return { result: { created: true, id, title: args.title } };
-      }
-      case 'complete_task': {
-        db.prepare("UPDATE tasks SET status = 'completed', done_at = ? WHERE id = ?").run(
-          new Date().toISOString(),
-          args.taskId
-        );
-        return { result: { completed: true, id: args.taskId } };
-      }
-      case 'start_focus_session': {
-        const id = `focus-${Date.now()}`;
-        const mins = Number(args.minutes) || 25;
-        db.prepare(
-          'INSERT INTO focus_sessions (id, start, goal_min, result, distraction_count) VALUES (?, ?, ?, ?, 0)'
-        ).run(id, new Date().toISOString(), mins, 'active');
-        return { result: { active: true, id, goal_min: mins } };
-      }
-      case 'set_reminder': {
-        const id = `sched-${Date.now()}`;
-        db.prepare(
-          'INSERT INTO schedules (id, name, cron, action, enabled, next_run) VALUES (?, ?, ?, ?, 1, ?)'
-        ).run(id, args.text, args.at, 'reminder', args.at);
-        return { result: { scheduled: true, id, at: args.at, text: args.text } };
-      }
-      case 'request_consequence': {
-        const policyResult = evaluateConsequenceRequest(
-          {
-            rung: args.rung,
-            intensity: args.intensity,
-            reason: args.reason,
-            timestamp: new Date().toISOString(),
-          },
-          settings,
-          0.9,
-          'normal',
-          false,
-          0
-        );
-        return { result: policyResult };
-      }
-      case 'browse_url': {
-        const pane: Pane = {
-          id: `pane-web-${Date.now()}`,
-          title: args.url,
-          kind: 'web',
-          url: args.url,
-          snippet: 'Page content requested.',
-        };
-        return { result: { browsed: true, url: args.url }, pane };
-      }
-      case 'show_image': {
-        const pane: Pane = {
-          id: `pane-img-${Date.now()}`,
-          title: args.caption || 'Image',
-          kind: 'image',
-          url: args.url,
-          caption: args.caption,
-        };
-        return { result: { displayed: true, url: args.url }, pane };
-      }
-      default:
-        return { result: null, error: `Unknown tool: ${name}` };
-    }
-  } catch (err) {
-    return { result: null, error: err instanceof Error ? err.message : String(err) };
+export function isHermesPrimaryEnabled(): boolean {
+  if (process.env.SOFIA_HERMES_PRIMARY === 'false' || process.env.SOFIA_HERMES_PRIMARY === '0') {
+    return false;
   }
+  if (process.env.SOFIA_HERMES_PRIMARY === 'true' || process.env.SOFIA_HERMES_PRIMARY === '1') {
+    return true;
+  }
+  if (process.env.HERMES_ENABLED === 'false' || process.env.HERMES_ENABLED === '0') {
+    return false;
+  }
+  if (process.env.HERMES_ENABLED === 'true' || process.env.HERMES_ENABLED === '1') {
+    return true;
+  }
+  const config = getHermesConfig();
+  return Boolean(config.enabled && config.apiKey && config.baseUrl);
 }
 
-export async function processSofiaBrainTurn(
+export function isLegacyBrainFallbackEnabled(): boolean {
+  return process.env.SOFIA_LEGACY_BRAIN_FALLBACK === 'true' || process.env.SOFIA_LEGACY_BRAIN_FALLBACK === '1';
+}
+
+export async function generateLegacyBrainTurn(
   db: DatabaseSync,
   userMessage: string,
   history: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }> = []
-): Promise<{
-  text: string;
-  say: string;
-  mood: SofiaExpression;
-  panes?: Pane[];
-  toolCalls?: any[];
-  turn: SofiaTurn;
-}> {
+): Promise<SofiaTurnResult> {
   const today = new Date().toISOString().slice(0, 10);
   const settings = getSettings(db);
 
@@ -511,9 +233,12 @@ export async function processSofiaBrainTurn(
   const contextBlock = buildLiveContextBlock(db, today);
 
   // 3. Memory: up to 4 pinned notes
-  const pinnedNotes = db
-    .prepare('SELECT text FROM memory_notes WHERE pinned = 1 LIMIT 4')
-    .all() as Array<{ text: string }>;
+  let pinnedNotes: Array<{ text: string }> = [];
+  try {
+    pinnedNotes = db
+      .prepare('SELECT text FROM memory_notes WHERE pinned = 1 LIMIT 4')
+      .all() as Array<{ text: string }>;
+  } catch {}
 
   const contextMessage = `LIVE CONTEXT:
 ${JSON.stringify(contextBlock, null, 2)}
@@ -682,10 +407,7 @@ ${pinnedNotes.map((n, i) => `${i + 1}. ${n.text}`).join('\n')}`;
             collectedPanes.push(toolExec.pane);
           }
 
-          // Push model turn (includes thoughtSignature and functionCall)
           geminiContents.push(candidate.content);
-
-          // Push tool response with role 'user'
           geminiContents.push({
             role: 'user',
             parts: [
@@ -722,10 +444,9 @@ ${pinnedNotes.map((n, i) => `${i + 1}. ${n.text}`).join('\n')}`;
     }
   }
 
-  // 3. Graceful fact-based fallback (incorporating user context to prevent static repetition)
+  // 3. Graceful fact-based fallback (incorporating user context)
   const stats = getDayStats(db, today);
   const scoreData = getDayScore(db, today);
-  const leisurePct = stats.active_min > 0 ? Math.round((stats.leisure_min / stats.active_min) * 100) : 0;
 
   const dynamicSay = `Acknowledged. I'm operating on local telemetry cache: Score ${scoreData.score.toFixed(0)}, ${stats.commits} commits, ${stats.work_min}m focus logged. Ready when you are.`;
 
@@ -745,4 +466,228 @@ ${pinnedNotes.map((n, i) => `${i + 1}. ${n.text}`).join('\n')}`;
   };
 }
 
+async function dispatchToHermesPrimary(
+  db: DatabaseSync,
+  userMessage: string,
+  history: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }> = [],
+  options: BrainTurnOptions = {}
+): Promise<SofiaTurnResult> {
+  const conversationId = options.conversationId || options.sessionId || 'default';
+  const sofiaRunId = `srun_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const settings = getSettings(db);
+  const instructions = buildHermesEphemeralInstructions(settings);
+
+  const client = getHermesClient();
+  const config = (client as any).validateConfig ? (client as any).validateConfig() : { sessionKey: 'default' };
+  const sessionKeyRef = hashSessionKey(config.sessionKey);
+
+  // Hermes maintains session context internally when session_id is provided.
+  // Resending past turns alongside session_id causes exponential duplication in Hermes session.
+  const input = userMessage;
+
+  const run = await client.createRun({
+    input,
+    instructions,
+    session_id: conversationId,
+  });
+
+  registerRun(db, {
+    id: sofiaRunId,
+    hermesRunId: run.run_id,
+    conversationId,
+    sessionKeyRef,
+    userId: 'owner',
+    status: run.status || 'started',
+    prompt: userMessage,
+  });
+
+  // Poll for completion (up to 30s)
+  const status = await client.pollRunUntilComplete(run.run_id, {
+    maxWaitMs: 30000,
+    intervalMs: 1200,
+  });
+
+  if (status.status === 'completed') {
+    const rawOutput = status.output || '';
+    const turn = parseTurn(rawOutput);
+    updateRunRecord(db, sofiaRunId, {
+      status: 'completed',
+      output: rawOutput,
+      progressMeta: status.usage ? { usage: status.usage } : undefined,
+    });
+    return {
+      text: turn.say,
+      say: turn.say,
+      mood: turn.mood as SofiaExpression,
+      panes: turn.panes,
+      turn,
+      runId: run.run_id,
+      sofiaRunId,
+      isHermes: true,
+    };
+  }
+
+  if (status.status === 'waiting_approval') {
+    const natural = getNaturalProgressLine('waiting_approval');
+
+    // Look up or register server approval record
+    let approval = db.prepare(
+      "SELECT * FROM hermes_approvals WHERE (run_id = ? OR hermes_run_id = ?) AND status = 'pending' ORDER BY created_at DESC LIMIT 1"
+    ).get(sofiaRunId, run.run_id) as any;
+
+    if (!approval) {
+      const toolName = (status as any).tool_name || (status as any).command || 'consequential_action';
+      const parameters = (status as any).parameters || (status as any).arguments || {};
+      approval = recordApprovalRequest(db, {
+        runId: sofiaRunId,
+        hermesRunId: run.run_id,
+        conversationId: options.sessionId || 'default',
+        toolName,
+        parameters,
+      });
+    }
+
+    const preview = typeof approval.preview_json === 'string' ? JSON.parse(approval.preview_json) : approval.preview || {};
+    const approvalPane: ApprovalPane = {
+      id: `pane-approval-${approval.id}`,
+      title: 'Action Requires Approval',
+      kind: 'approval',
+      approval_id: approval.id,
+      run_id: run.run_id,
+      tool_name: approval.tool_name,
+      target: approval.tool_call_id || approval.tool_name,
+      risk_level: approval.risk_level,
+      preview,
+      reason: natural.say,
+      expires_at: approval.expires_at,
+      action_hash: approval.action_hash,
+      requires_strong_confirmation: approval.risk_level === 'R3',
+    };
+
+    const turn: SofiaTurn = {
+      say: natural.say,
+      mood: natural.mood,
+      panes: [approvalPane],
+    };
+    return {
+      text: turn.say,
+      say: turn.say,
+      mood: turn.mood as SofiaExpression,
+      panes: turn.panes,
+      turn,
+      runId: run.run_id,
+      sofiaRunId,
+      isHermes: true,
+    };
+  }
+
+  // If still running after 30s: Asynchronous task tracking
+  if (status.status === 'running' || status.status === 'started' || status.status === 'queued') {
+    const turn: SofiaTurn = {
+      say: "I'm executing that task in the background. You can track progress on the Stage.",
+      mood: 'focused',
+      panes: [
+        {
+          id: `pane-run-${run.run_id}`,
+          title: 'Hermes Background Execution',
+          kind: 'code',
+          language: 'bash',
+          run_id: run.run_id,
+          status: status.status,
+          code: `Run ID: ${run.run_id}\nStatus: ${status.status}\nPrompt: ${userMessage.slice(0, 80)}`,
+        },
+      ],
+    };
+    return {
+      text: turn.say,
+      say: turn.say,
+      mood: turn.mood as SofiaExpression,
+      panes: turn.panes,
+      turn,
+      runId: run.run_id,
+      sofiaRunId,
+      isHermes: true,
+    };
+  }
+
+  // Failed / Stopped
+  const isFailed = status.status === 'failed';
+  const natural = getNaturalProgressLine(status.status);
+  const errMsg = typeof status.error === 'string' ? status.error : status.error?.message;
+  updateRunRecord(db, sofiaRunId, {
+    status: status.status,
+    output: status.output,
+    error: errMsg,
+  });
+  const say = isFailed && errMsg ? `${natural.say} (${errMsg})` : natural.say;
+  return {
+    text: say,
+    say,
+    mood: natural.mood as SofiaExpression,
+    turn: { say, mood: natural.mood },
+    runId: run.run_id,
+    sofiaRunId,
+    isHermes: true,
+    error: errMsg,
+  };
+}
+
+export async function processSofiaBrainTurn(
+  db: DatabaseSync,
+  userMessage: string,
+  history: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }> = [],
+  options: BrainTurnOptions = {}
+): Promise<SofiaTurnResult> {
+  const settings = getSettings(db);
+
+  if (isHermesPrimaryEnabled()) {
+    try {
+      return await dispatchToHermesPrimary(db, userMessage, history, options);
+    } catch (err: any) {
+      console.warn('Hermes primary dispatch failed:', err?.message || err);
+
+      if (isLegacyBrainFallbackEnabled()) {
+        const legacy = await generateLegacyBrainTurn(db, userMessage, history);
+        const text = `[Operating in degraded mode: Hermes agent unreachable]\n\n${legacy.text}`;
+        return {
+          ...legacy,
+          text,
+          say: legacy.say,
+          degraded: true,
+        };
+      }
+
+      // Explicit report of degraded mode when fallback is not configured
+      const say = "I cannot connect to the Hermes execution engine. Operating in degraded mode.";
+      return {
+        text: say,
+        say,
+        mood: 'concerned',
+        turn: { say, mood: 'concerned' },
+        degraded: true,
+        error: err?.message || String(err),
+      };
+    }
+  }
+
+  if (isLegacyBrainFallbackEnabled()) {
+    const legacy = await generateLegacyBrainTurn(db, userMessage, history);
+    return {
+      ...legacy,
+      text: `[Operating in degraded mode: Hermes agent unreachable]\n\n${legacy.text}`,
+      degraded: true,
+    };
+  }
+
+  const say = "Hermes primary intelligence is not configured. Sofia is in degraded mode.";
+  return {
+    text: say,
+    say,
+    mood: 'concerned',
+    turn: { say, mood: 'concerned' },
+    degraded: true,
+  };
+}
+
 export const processSofiaChatTurn = processSofiaBrainTurn;
+

@@ -1,8 +1,14 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/db';
 import { getLiveConfig } from '@/lib/live/config';
+import { verifyApiAuth } from '@/lib/auth';
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const auth = verifyApiAuth(req);
+  if (!auth.authorized) {
+    return auth.response!;
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
@@ -11,9 +17,12 @@ export async function POST() {
     );
   }
 
+  const bodyData = await req.json().catch(() => ({}));
+  const conversationId = bodyData.conversationId || req.nextUrl.searchParams.get('conversationId') || 'default';
+
   const now = Date.now();
   const db = getDatabase();
-  const cfg = getLiveConfig(db);
+  const cfg = getLiveConfig(db, conversationId);
 
   const body = {
     uses: 1,

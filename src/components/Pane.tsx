@@ -11,7 +11,10 @@ import {
   ImagePane,
   TodoPane,
   CodePane,
+  ApprovalPane,
+  BrowserPane,
 } from '@/lib/stage';
+import { BrowserWorkspace } from './BrowserWorkspace';
 import {
   Pin,
   X,
@@ -22,6 +25,9 @@ import {
   Circle,
   Clock,
   Sparkles,
+  AlertTriangle,
+  ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface PaneProps {
@@ -31,6 +37,10 @@ interface PaneProps {
 }
 
 export const Pane: React.FC<PaneProps> = ({ pane, onDismiss, onPin }) => {
+  if (pane.kind === 'browser') {
+    return <BrowserWorkspace pane={pane} onDismiss={() => onDismiss(pane.id)} />;
+  }
+
   return (
     <div
       className="glass-panel border border-burgundy-700/40 rounded-2xl shadow-[0_12px_40px_rgba(20,3,10,0.7)] backdrop-blur-2xl overflow-hidden flex flex-col transition-all duration-300 w-full text-rose-100"
@@ -80,6 +90,7 @@ export const Pane: React.FC<PaneProps> = ({ pane, onDismiss, onPin }) => {
         {pane.kind === 'image' && <ImagePaneContent pane={pane} />}
         {pane.kind === 'todo' && <TodoPaneContent pane={pane} />}
         {pane.kind === 'code' && <CodePaneContent pane={pane} />}
+        {pane.kind === 'approval' && <ApprovalPaneContent pane={pane} onDismiss={onDismiss} />}
       </div>
     </div>
   );
@@ -465,6 +476,183 @@ const CodePaneContent: React.FC<{ pane: CodePane }> = ({ pane }) => {
       <pre className="p-3 rounded-xl bg-[#0d0107] border border-rose-900/40 font-mono text-xs text-rose-100 overflow-x-auto leading-relaxed">
         <code>{pane.code}</code>
       </pre>
+    </div>
+  );
+};
+
+/* -------------------------------------------------------------
+ * Approval Pane (Server-Enforced Human Approval Gate)
+ * ------------------------------------------------------------- */
+const ApprovalPaneContent: React.FC<{ pane: ApprovalPane; onDismiss: (id: string) => void }> = ({
+  pane,
+}) => {
+  const [copied, setCopied] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [confirmedRisk, setConfirmedRisk] = useState(!pane.requires_strong_confirmation);
+  const [decision, setDecision] = useState<string | null>(pane.status && pane.status !== 'pending' ? pane.status : null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const isR3 = pane.risk_level === 'R3';
+  const previewJson = JSON.stringify(pane.preview || {}, null, 2);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(previewJson);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const submitDecision = async (action: 'approve' | 'deny') => {
+    if (action === 'approve' && isR3 && !confirmedRisk) {
+      setErrorMsg('Please confirm acknowledgment of high-consequence risk before approving.');
+      return;
+    }
+
+    setSubmitting(true);
+    setErrorMsg(null);
+
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('sofia_token') : '';
+      const res = await fetch(`/api/hermes/approvals/${encodeURIComponent(pane.approval_id)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          action,
+          expected_action_hash: pane.action_hash,
+          confirmed_risk: isR3 ? confirmedRisk : undefined,
+          reason: action === 'approve' ? 'Authorized by owner via Stage' : 'Denied by owner via Stage',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      setDecision(action === 'approve' ? 'approved' : 'denied');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to submit approval decision');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 py-1 text-xs">
+      {/* Risk Badge & Tool Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-1.5">
+          <span
+            className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] uppercase border ${
+              isR3
+                ? 'bg-rose-950 text-rose-300 border-rose-600/60'
+                : 'bg-amber-950 text-amber-300 border-amber-600/60'
+            }`}
+          >
+            {pane.risk_level} Risk
+          </span>
+          <span className="font-mono text-rose-200 font-semibold">{pane.tool_name}</span>
+        </div>
+        {pane.expires_at && (
+          <div className="flex items-center space-x-1 text-[10px] text-rose-400/80 font-mono">
+            <Clock className="w-3 h-3" />
+            <span>Expires: {new Date(pane.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Target & Reason */}
+      <div className="p-2.5 rounded-lg bg-burgundy-950/60 border border-burgundy-800/40 space-y-1">
+        {pane.target && (
+          <div className="text-rose-300">
+            <span className="text-rose-400/70 font-mono">Target: </span>
+            <span className="font-mono font-medium">{pane.target}</span>
+          </div>
+        )}
+        <div className="text-rose-200/90 leading-relaxed">{pane.reason}</div>
+      </div>
+
+      {/* Structured Preview */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-[11px] font-mono text-rose-400">
+          <span>Action Parameters</span>
+          <button
+            onClick={handleCopy}
+            className="flex items-center space-x-1 px-1.5 py-0.5 rounded hover:bg-rose-950/60 text-rose-400 hover:text-rose-200 transition-colors"
+          >
+            {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+            <span>{copied ? 'Copied' : 'Copy'}</span>
+          </button>
+        </div>
+        <pre className="p-2.5 rounded-lg bg-[#0a0105] border border-rose-900/40 font-mono text-[11px] text-rose-200 overflow-x-auto leading-relaxed max-h-36">
+          <code>{previewJson}</code>
+        </pre>
+      </div>
+
+      {/* R3 Strong Confirmation Checkbox */}
+      {isR3 && !decision && (
+        <label className="flex items-start space-x-2 p-2 rounded-lg bg-rose-950/40 border border-rose-900/50 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={confirmedRisk}
+            onChange={(e) => setConfirmedRisk(e.target.checked)}
+            className="mt-0.5 rounded border-rose-700 text-rose-600 focus:ring-rose-500 bg-rose-950"
+          />
+          <span className="text-[11px] text-rose-200 leading-tight">
+            I confirm that I understand this action performs consequential system/data modification.
+          </span>
+        </label>
+      )}
+
+      {/* Error message */}
+      {errorMsg && (
+        <div className="flex items-center space-x-1.5 p-2 rounded bg-rose-950/80 border border-rose-600/80 text-rose-200 text-[11px]">
+          <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {/* Decision Buttons or Status */}
+      {decision ? (
+        <div
+          className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-lg font-mono text-xs font-semibold ${
+            decision === 'approved'
+              ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-600/50'
+              : 'bg-rose-950/80 text-rose-300 border border-rose-600/50'
+          }`}
+        >
+          {decision === 'approved' ? (
+            <>
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>Decision: Authorized (Executing...)</span>
+            </>
+          ) : (
+            <>
+              <ShieldAlert className="w-4 h-4 text-rose-400" />
+              <span>Decision: Denied</span>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="flex items-center space-x-2 pt-1">
+          <button
+            onClick={() => submitDecision('approve')}
+            disabled={submitting || (isR3 && !confirmedRisk)}
+            className="flex-1 py-2 px-3 rounded-lg bg-emerald-600/80 hover:bg-emerald-500 text-white font-mono font-semibold text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_12px_rgba(16,185,129,0.3)]"
+          >
+            {submitting ? 'Submitting...' : 'Approve'}
+          </button>
+          <button
+            onClick={() => submitDecision('deny')}
+            disabled={submitting}
+            className="flex-1 py-2 px-3 rounded-lg bg-rose-900/60 hover:bg-rose-800 text-rose-200 hover:text-white font-mono font-semibold text-xs transition-all border border-rose-700/50 disabled:opacity-40"
+          >
+            Deny
+          </button>
+        </div>
+      )}
     </div>
   );
 };

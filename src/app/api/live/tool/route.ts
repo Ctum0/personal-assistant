@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { name, args } = body;
+    const { name, args, conversationId, sessionId } = body;
 
     if (!name || typeof name !== 'string') {
       return NextResponse.json({ error: 'Tool name is required' }, { status: 400 });
@@ -20,7 +20,13 @@ export async function POST(req: NextRequest) {
     const db = getDatabase();
     const settings = getSettings(db);
 
-    const execResult = await executeTool(db, name, args || {}, settings);
+    const toolArgs = {
+      ...(args || {}),
+      conversationId: conversationId || sessionId || args?.conversationId || args?.sessionId || 'default',
+      sessionId: sessionId || conversationId || args?.sessionId || args?.conversationId || 'default',
+    };
+
+    const execResult = await executeTool(db, name, toolArgs, settings);
 
     return NextResponse.json(execResult);
   } catch (err: any) {
