@@ -501,9 +501,9 @@ async function dispatchToHermesPrimary(
     prompt: userMessage,
   });
 
-  // Poll for completion (up to 30s)
+  // Poll for completion (up to 90s for multi-step tool execution)
   const status = await client.pollRunUntilComplete(run.run_id, {
-    maxWaitMs: 30000,
+    maxWaitMs: 90000,
     intervalMs: 1200,
   });
 
