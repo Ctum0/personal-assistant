@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyApiAuth } from '@/lib/auth';
-import { getDatabase } from '@/lib/db';
+import { getDatabase, consumeBrowserStreamTicket } from '@/lib/db';
 import { getBrowserSession } from '@/lib/browser/session';
 import { getBrowserManager, ScreencastFrame } from '@/server/browser-manager';
 
@@ -8,13 +8,23 @@ export async function GET(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const auth = verifyApiAuth(req);
-  if (!auth.authorized) {
-    return auth.response!;
-  }
-
   const { id } = await context.params;
   const db = getDatabase();
+
+  const ticket = req.nextUrl.searchParams.get('ticket')?.trim();
+  let isAuthorized = false;
+
+  if (ticket) {
+    isAuthorized = consumeBrowserStreamTicket(db, ticket, id);
+  }
+
+  if (!isAuthorized) {
+    const auth = verifyApiAuth(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
+  }
+
   const session = getBrowserSession(db, id, 'owner');
 
   if (!session) {

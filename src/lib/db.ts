@@ -264,6 +264,15 @@ export function initDatabase(db: DatabaseSync) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS browser_stream_tickets (
+      ticket TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_stream_tickets_expiry ON browser_stream_tickets(expires_at, used);
   `);
 
   // Migration guards for columns added in v2 & v3
@@ -784,4 +793,35 @@ export function getTodayLiveSeconds(db: DatabaseSync): number {
     | undefined;
   return row?.total ?? 0;
 }
+
+export function createBrowserStreamTicket(db: DatabaseSync, sessionId: string, ttlMs: number = 60_000): string {
+  const ticket = `bst_${Date.now()}_${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
+  const now = Date.now();
+  const expiresAt = now + ttlMs;
+
+  try {
+    db.prepare('DELETE FROM browser_stream_tickets WHERE expires_at < ?').run(now - 300_000);
+  } catch {}
+
+  db.prepare(
+    'INSERT INTO browser_stream_tickets (ticket, session_id, created_at, expires_at, used) VALUES (?, ?, ?, ?, 0)'
+  ).run(ticket, sessionId, now, expiresAt);
+
+  return ticket;
+}
+
+export function consumeBrowserStreamTicket(db: DatabaseSync, ticket: string, sessionId: string): boolean {
+  if (!ticket || !sessionId) return false;
+  const now = Date.now();
+
+  const row = db
+    .prepare('SELECT ticket FROM browser_stream_tickets WHERE ticket = ? AND session_id = ? AND expires_at > ? AND used = 0')
+    .get(ticket, sessionId, now) as { ticket?: string } | undefined;
+
+  if (!row) return false;
+
+  db.prepare('UPDATE browser_stream_tickets SET used = 1 WHERE ticket = ?').run(ticket);
+  return true;
+}
+
 

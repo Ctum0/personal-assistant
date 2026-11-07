@@ -52,8 +52,8 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
     if (pane.lease_holder) setLeaseHolder(pane.lease_holder);
   }, [pane.url, pane.title, pane.lease_holder]);
 
-  // Render JPEG frame onto Canvas
-  const renderFrame = useCallback((base64Jpeg: string) => {
+  // Render JPEG frame dynamically onto Canvas matching actual CDP screencast dimensions
+  const renderFrame = useCallback((base64Jpeg: string, metadata?: any) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -61,18 +61,22 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
 
     const img = new Image();
     img.onload = () => {
-      canvas.width = 1280;
-      canvas.height = 800;
-      ctx.drawImage(img, 0, 0, 1280, 800);
+      const targetWidth = img.naturalWidth || metadata?.deviceWidth || 1280;
+      const targetHeight = img.naturalHeight || metadata?.deviceHeight || 800;
+      if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+      }
+      ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
     };
     img.src = `data:image/jpeg;base64,${base64Jpeg}`;
   }, []);
 
   // Connect to live visual screencast SSE stream and rehydrate session
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('sofia_token') || '' : '';
-    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-    const streamUrl = `/api/browser/sessions/${encodeURIComponent(pane.session_id)}/stream${tokenParam}`;
+    let cancelled = false;
+    let eventSource: EventSource | null = null;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('sofia_token') || localStorage.getItem('sofia_api_token') || '' : '';
 
     // Initial session rehydration
     fetch(`/api/browser/sessions/${encodeURIComponent(pane.session_id)}`, {
@@ -80,6 +84,7 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
+        if (cancelled) return;
         if (data?.session) {
           if (data.session.current_url) {
             setCurrentUrl(data.session.current_url);
@@ -91,39 +96,70 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
       })
       .catch(() => {});
 
-    let eventSource: EventSource | null = null;
+    async function connectStream() {
+      try {
+        let streamUrl = `/api/browser/sessions/${encodeURIComponent(pane.session_id)}/stream`;
 
-    try {
-      // EventSource with query param token for seamless SSE authorization
-      eventSource = new EventSource(streamUrl);
-
-      eventSource.onopen = () => {
-        setConnected(true);
-        setErrorMsg(null);
-      };
-
-      eventSource.addEventListener('connected', () => {
-        setConnected(true);
-      });
-
-      eventSource.addEventListener('frame', (e: MessageEvent) => {
+        // Request secure, short-lived single-use ticket to avoid exposing long-lived token in URL
         try {
-          const payload = JSON.parse(e.data);
-          if (payload.data) {
-            setLatestFrame(payload.data);
-            renderFrame(payload.data);
+          const ticketRes = await fetch(`/api/browser/sessions/${encodeURIComponent(pane.session_id)}/ticket`, {
+            method: 'POST',
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (ticketRes.ok) {
+            const ticketData = await ticketRes.json();
+            if (ticketData?.ticket) {
+              streamUrl += `?ticket=${encodeURIComponent(ticketData.ticket)}`;
+            }
+          } else if (token) {
+            streamUrl += `?token=${encodeURIComponent(token)}`;
           }
-        } catch {}
-      });
+        } catch {
+          if (token) {
+            streamUrl += `?token=${encodeURIComponent(token)}`;
+          }
+        }
 
-      eventSource.onerror = () => {
-        setConnected(false);
-      };
-    } catch {
-      setErrorMsg('Failed to connect to live visual stream');
+        if (cancelled) return;
+
+        eventSource = new EventSource(streamUrl);
+
+        eventSource.onopen = () => {
+          if (!cancelled) {
+            setConnected(true);
+            setErrorMsg(null);
+          }
+        };
+
+        eventSource.addEventListener('connected', () => {
+          if (!cancelled) setConnected(true);
+        });
+
+        eventSource.addEventListener('frame', (e: MessageEvent) => {
+          if (cancelled) return;
+          try {
+            const payload = JSON.parse(e.data);
+            if (payload.data) {
+              setLatestFrame(payload.data);
+              renderFrame(payload.data, payload.metadata);
+            }
+          } catch {}
+        });
+
+        eventSource.onerror = () => {
+          if (!cancelled) setConnected(false);
+        };
+      } catch {
+        if (!cancelled) {
+          setErrorMsg('Failed to connect to live visual stream');
+        }
+      }
     }
 
+    connectStream();
+
     return () => {
+      cancelled = true;
       if (eventSource) {
         eventSource.close();
       }
@@ -150,16 +186,18 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
     [pane.session_id, leaseHolder]
   );
 
-  // Canvas Mouse Coordinates Translator
+  // Canvas Mouse Coordinates Translator (dynamically scaled to actual canvas bitmap resolution)
   const getCanvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const scaleX = 1280 / rect.width;
-    const scaleY = 800 / rect.height;
+    const nativeWidth = canvas.width || 1280;
+    const nativeHeight = canvas.height || 800;
+    const scaleX = nativeWidth / rect.width;
+    const scaleY = nativeHeight / rect.height;
     const x = Math.round((e.clientX - rect.left) * scaleX);
     const y = Math.round((e.clientY - rect.top) * scaleY);
-    return { x: Math.max(0, Math.min(1280, x)), y: Math.max(0, Math.min(800, y)) };
+    return { x: Math.max(0, Math.min(nativeWidth, x)), y: Math.max(0, Math.min(nativeHeight, y)) };
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {

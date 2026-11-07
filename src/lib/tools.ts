@@ -358,6 +358,36 @@ export const UNIFIED_TOOLS = [
       required: ['task'],
     },
   },
+  {
+    name: 'sofia_delegate_to_hermes',
+    description:
+      'Delegate an action, research, long-term memory retrieval, code execution, terminal command, or browser automation task to Hermes. Returns an asynchronous task ID immediately so conversation does not block.',
+    geminiParameters: {
+      type: 'OBJECT',
+      properties: {
+        task: { type: 'STRING', description: 'Clear, detailed description of the task for Hermes to execute' },
+        category: {
+          type: 'STRING',
+          enum: ['action', 'research', 'browser', 'terminal', 'memory'],
+          description: 'Type of task being delegated',
+        },
+        context: { type: 'STRING', description: 'Optional background context or constraints' },
+      },
+      required: ['task'],
+    },
+    openaiParameters: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'Clear, detailed description of the task for Hermes to execute' },
+        category: {
+          type: 'string',
+          enum: ['action', 'research', 'browser', 'terminal', 'memory'],
+        },
+        context: { type: 'string' },
+      },
+      required: ['task'],
+    },
+  },
 
   // Tier 4: Live Browser Workspace (Interactive Shared Stage Browser)
   {
@@ -641,6 +671,7 @@ export async function executeTool(
   const risk = evaluateToolRisk(name, args || {});
   const delegatesToHermes = [
     'ask_hermes',
+    'sofia_delegate_to_hermes',
     'computer_screenshot',
     'computer_file_read',
     'computer_file_write',
@@ -1203,7 +1234,8 @@ export async function executeTool(
       case 'hermes_task_run':
       case 'hermes_task_status':
       case 'hermes_tool_call':
-      case 'ask_hermes': {
+      case 'ask_hermes':
+      case 'sofia_delegate_to_hermes': {
         return await delegateToHermes(db, name, args);
       }
 
@@ -1221,8 +1253,10 @@ async function delegateToHermes(db: DatabaseSync, tool: string, args: any): Prom
   const sofiaRunId = `srun_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const conversationId = String(args.conversationId || args.sessionId || 'default').trim() || 'default';
   const prompt =
-    tool === 'ask_hermes'
-      ? String(args.task || args.prompt || '').trim()
+    tool === 'ask_hermes' || tool === 'sofia_delegate_to_hermes'
+      ? String(args.task || args.prompt || '').trim() +
+        (args.category ? ` [Category: ${args.category}]` : '') +
+        (args.context ? ` [Context: ${args.context}]` : '')
       : `Execute task/tool ${tool} with parameters: ${JSON.stringify(args)}`;
 
   const instructions = buildHermesEphemeralInstructions();

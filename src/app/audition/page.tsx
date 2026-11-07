@@ -66,18 +66,24 @@ export default function AuditionPage() {
       const tokenRes = await fetch('/api/live/token', {
         method: 'POST',
         headers: authHeaders,
+        body: JSON.stringify({ voice: voiceName, model: 'gemini-3.8-live' }),
       });
 
       if (!tokenRes.ok) {
-        throw new Error(`Token mint failed: ${tokenRes.status}`);
+        const errJson = await tokenRes.json().catch(() => ({}));
+        throw new Error(errJson.detail || errJson.error || `Token mint failed: ${tokenRes.status}`);
       }
 
-      const { token } = await tokenRes.json();
+      const { token, model: returnedModel } = await tokenRes.json();
       const rawToken = token.replace(/^auth_tokens\//, '');
       const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${rawToken}`;
       const ws = new WebSocket(wsUrl);
 
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AudioCtxClass();
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
       let playHead = audioCtx.currentTime;
 
       ws.onopen = () => {

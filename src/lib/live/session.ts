@@ -189,8 +189,8 @@ export class SofiaLiveSession {
                   this.n = 0;
                 }
               }
-              while (this.out.length >= 1600) {
-                const pcm = new Int16Array(this.out.splice(0, 1600));
+              while (this.out.length >= 640) {
+                const pcm = new Int16Array(this.out.splice(0, 640));
                 const b = new Uint8Array(pcm.buffer);
                 let s = '';
                 for (let i = 0; i < b.length; i++) {

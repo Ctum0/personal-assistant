@@ -22,7 +22,10 @@ export async function POST(req: NextRequest) {
 
   const now = Date.now();
   const db = getDatabase();
-  const cfg = getLiveConfig(db, conversationId);
+  const cfg = getLiveConfig(db, conversationId, {
+    voice: bodyData.voice,
+    model: bodyData.model,
+  });
 
   const body = {
     uses: 1,
