@@ -19,6 +19,7 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm run build
+RUN find node_modules -name "browsers.json" | while read f; do mkdir -p ".next/standalone/$(dirname "$f")" && cp "$f" ".next/standalone/$f"; done
 
 # Production image, copy all the files and run next
 FROM base AS runner
