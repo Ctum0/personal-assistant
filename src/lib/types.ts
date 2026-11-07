@@ -84,6 +84,8 @@ export interface SofiaSettings {
     voice_name: string;
     rate: number;
     pitch: number;
+    live_voice?: string;
+    live_model?: string;
   };
   consequences: {
     master_switch: boolean;
@@ -146,6 +148,8 @@ export const defaultSettings: SofiaSettings = {
     voice_name: 'en-US-AvaNeural',
     rate: 1.0,
     pitch: 1.05,
+    live_voice: 'Aoede',
+    live_model: 'gemini-3.8-live',
   },
   consequences: {
     master_switch: false,

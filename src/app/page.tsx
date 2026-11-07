@@ -60,7 +60,7 @@ export default function SofiaStageHome() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
 
-  // Initialize or restore canonical conversation identity from localStorage
+  // Initialize or restore canonical conversation identity from localStorage and server SQLite
   useEffect(() => {
     if (typeof window !== 'undefined') {
       let stored = localStorage.getItem('sofia_conversation_id');
@@ -70,29 +70,64 @@ export default function SofiaStageHome() {
       }
       setConversationId(stored);
 
-      // Rehydrate active browser session for this conversation if present
-      fetch(`/api/browser/sessions?conversation_id=${encodeURIComponent(stored)}`, {
+      // 1. Rehydrate conversation messages to restore latest Sofia caption and turn context
+      fetch(`/api/chat${stored ? `?sessionId=${encodeURIComponent(stored)}` : ''}`, {
+        headers: getAuthHeaders(),
+      })
+        .then((res) => (res.ok ? res.json() : []))
+        .then((messages) => {
+          if (Array.isArray(messages) && messages.length > 0) {
+            const lastSession = messages[messages.length - 1].session_id;
+            if (lastSession && lastSession !== 'default' && !stored) {
+              setConversationId(lastSession);
+              localStorage.setItem('sofia_conversation_id', lastSession);
+            }
+            const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+            const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+            if (lastAssistant?.content) {
+              setCaptionText(lastAssistant.content);
+              if (lastAssistant.mood) {
+                setExpression(getExpressionFromMood(lastAssistant.mood));
+                setMoodLabel(lastAssistant.mood.charAt(0).toUpperCase() + lastAssistant.mood.slice(1));
+              }
+            }
+            if (lastUser?.content) {
+              setUserCaption(lastUser.content);
+            }
+          }
+        })
+        .catch(() => {});
+
+      // 2. Rehydrate active browser session for this conversation or active workspace
+      fetch(`/api/browser/sessions`, {
         headers: getAuthHeaders(),
       })
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
-          if (data?.sessions && data.sessions.length > 0) {
-            const activeSess = data.sessions[0];
-            setPanes((prev) => {
-              if (prev.some((p) => p.kind === 'browser')) return prev;
-              return [
-                {
-                  id: `pane-browser-${activeSess.id}`,
-                  title: activeSess.title,
-                  kind: 'browser',
-                  session_id: activeSess.id,
-                  url: activeSess.current_url,
-                  lease_holder: activeSess.lease_holder,
-                  status: activeSess.status,
-                },
-                ...prev,
-              ];
-            });
+          if (data?.sessions && Array.isArray(data.sessions)) {
+            const activeSess =
+              data.sessions.find(
+                (s: any) =>
+                  s.status === 'active' &&
+                  (s.conversation_id === stored || s.conversation_id === 'default' || !stored)
+              ) || data.sessions.find((s: any) => s.status === 'active');
+            if (activeSess) {
+              setPanes((prev) => {
+                if (prev.some((p) => p.kind === 'browser')) return prev;
+                return [
+                  {
+                    id: `pane-browser-${activeSess.id}`,
+                    title: activeSess.title,
+                    kind: 'browser',
+                    session_id: activeSess.id,
+                    url: activeSess.current_url,
+                    lease_holder: activeSess.lease_holder,
+                    status: activeSess.status,
+                  },
+                  ...prev,
+                ];
+              });
+            }
           }
         })
         .catch(() => {});
@@ -181,19 +216,23 @@ export default function SofiaStageHome() {
           const activeRuns = data.runs.filter((r: any) =>
             ['running', 'started', 'queued'].includes(r.status)
           );
-          if (activeRuns.length > 0) {
+          const recentCompleted = data.runs
+            .filter((r: any) => r.status === 'completed' && r.output)
+            .slice(0, 1);
+          const runsToShow = [...activeRuns, ...recentCompleted];
+          if (runsToShow.length > 0) {
             setPanes((prev) => {
               const existingRunIds = new Set(prev.map((p) => p.run_id));
-              const newPanes: Pane[] = activeRuns
+              const newPanes: Pane[] = runsToShow
                 .filter((r: any) => !existingRunIds.has(r.hermes_run_id))
                 .map((r: any) => ({
                   id: `pane-rehydrated-${r.hermes_run_id}`,
-                  title: `Hermes: Active Task`,
+                  title: `Hermes: ${r.status === 'completed' ? 'Task Completed' : 'Active Task'}`,
                   kind: 'code' as const,
-                  language: 'bash',
+                  language: 'markdown',
                   run_id: r.hermes_run_id,
                   status: r.status,
-                  code: `Task in progress on Hermes (Run ID: ${r.hermes_run_id})\nPrompt: ${r.prompt.slice(0, 80)}`,
+                  code: r.output || `Task in progress on Hermes (Run ID: ${r.hermes_run_id})\nPrompt: ${r.prompt.slice(0, 80)}`,
                 }));
               return [...prev, ...newPanes];
             });
@@ -657,6 +696,10 @@ export default function SofiaStageHome() {
                     )
                   );
 
+                  if (currentEvent === 'run.completed' && liveSessionRef.current) {
+                    liveSessionRef.current.injectContextUpdate(`Hermes task (Run ID ${p.run_id}) finished with output:\n${output}`);
+                  }
+
                   if (currentEvent === 'run.interrupted') {
                     fetch(`/api/hermes/approvals?conversation_id=${encodeURIComponent(conversationId)}&status=pending`, {
                       headers: getAuthHeaders(),
@@ -740,6 +783,11 @@ export default function SofiaStageHome() {
               const sayText = "I've completed that task on Hermes. The result is on your Stage.";
               setCaptionText(sayText);
               setExpression('pleased');
+              if (liveSessionRef.current) {
+                liveSessionRef.current.injectContextUpdate(
+                  `Hermes task (Run ID ${p.run_id}) finished with output:\n${runData.output || ''}`
+                );
+              }
               fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },

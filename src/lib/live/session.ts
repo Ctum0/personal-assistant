@@ -273,11 +273,21 @@ export class SofiaLiveSession {
           systemInstruction: {
             parts: [{ text: configData.systemPrompt || 'You are Sofia.' }],
           },
+          contextWindowCompression: {
+            slidingWindow: {},
+          },
           tools: configData.functionDeclarations
             ? [{ functionDeclarations: configData.functionDeclarations }]
             : undefined,
         },
       };
+
+      if (!this.resumptionHandle && typeof window !== 'undefined') {
+        const savedHandle = localStorage.getItem(`sofia_live_handle_${this.conversationId}`);
+        if (savedHandle) {
+          this.resumptionHandle = savedHandle;
+        }
+      }
 
       if (this.resumptionHandle) {
         setupMsg.setup.sessionResumption = { handle: this.resumptionHandle };
@@ -328,7 +338,13 @@ export class SofiaLiveSession {
 
     // 2. Resumption update handle
     if (msg.sessionResumptionUpdate?.newHandle) {
-      this.resumptionHandle = msg.sessionResumptionUpdate.newHandle;
+      const handle = String(msg.sessionResumptionUpdate.newHandle);
+      this.resumptionHandle = handle;
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(`sofia_live_handle_${this.conversationId}`, handle);
+        } catch {}
+      }
     }
 
     // 3. Server-side interruption (barge-in acknowledgement)
@@ -705,6 +721,31 @@ export class SofiaLiveSession {
         JSON.stringify({
           clientContent: {
             turns: [{ role: 'user', parts: [{ text }] }],
+            turnComplete: true,
+          },
+        })
+      );
+    }
+  }
+
+  /**
+   * Injects background task completion context or system notification into Gemini Live
+   */
+  public injectContextUpdate(text: string) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(
+        JSON.stringify({
+          clientContent: {
+            turns: [
+              {
+                role: 'user',
+                parts: [
+                  {
+                    text: `[SYSTEM UPDATE: Background Hermes task completed]\n${text}\nBriefly inform the user of this result in character.`,
+                  },
+                ],
+              },
+            ],
             turnComplete: true,
           },
         })

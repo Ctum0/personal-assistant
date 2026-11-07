@@ -15,6 +15,8 @@ import {
   AlertCircle,
   ShieldCheck,
   Loader2,
+  X,
+  Power,
 } from 'lucide-react';
 
 interface BrowserWorkspaceProps {
@@ -220,7 +222,12 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const { x, y } = getCanvasCoords(e);
-    sendInput({ type: 'click', x, y, button: e.button === 2 ? 'right' : 'left' });
+    sendInput({ type: 'click', x, y, button: e.button === 2 ? 'right' : 'left', clickCount: 1 });
+  };
+
+  const handleCanvasDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { x, y } = getCanvasCoords(e);
+    sendInput({ type: 'click', x, y, button: e.button === 2 ? 'right' : 'left', clickCount: 2 });
   };
 
   const handleCanvasWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -231,7 +238,11 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (leaseHolder !== 'HUMAN') return;
 
-    if (e.key === 'Tab') e.preventDefault();
+    if (e.key === 'Tab' || e.key === 'Enter' || e.key === 'Escape' || e.key === 'Backspace') {
+      sendInput({ type: 'keydown', key: e.key });
+      if (e.key === 'Tab') e.preventDefault();
+      return;
+    }
 
     if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
       sendInput({ type: 'type', text: e.key });
@@ -242,9 +253,7 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
 
   const handleKeyUp = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (leaseHolder !== 'HUMAN') return;
-    if (e.key.length > 1) {
-      sendInput({ type: 'keyup', key: e.key });
-    }
+    sendInput({ type: 'keyup', key: e.key });
   };
 
   // Navigate to URL action
@@ -332,6 +341,18 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
     const next = !expanded;
     setExpanded(next);
     if (onToggleExpand) onToggleExpand(next);
+  };
+
+  // Terminate browser session explicitly on worker and database
+  const handleCloseSession = async () => {
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('sofia_token') || '' : '';
+      await fetch(`/api/browser/sessions/${encodeURIComponent(pane.session_id)}`, {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    } catch {}
+    if (onDismiss) onDismiss();
   };
 
   return (
@@ -427,6 +448,28 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
         >
           {expanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
         </button>
+
+        {/* Dismiss Pane (Hides pane while leaving session alive) */}
+        {onDismiss && (
+          <button
+            onClick={onDismiss}
+            title="Dismiss Pane (keep session alive)"
+            aria-label="Dismiss Pane"
+            className="p-1 rounded-lg text-rose-400/80 hover:text-rose-100 hover:bg-rose-950/60 transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+
+        {/* Terminate Session (Closes Chromium worker session completely) */}
+        <button
+          onClick={handleCloseSession}
+          title="Close Browser Session (terminate worker)"
+          aria-label="Close Browser Session"
+          className="p-1 rounded-lg text-rose-500/80 hover:text-rose-200 hover:bg-rose-900/60 transition-colors"
+        >
+          <Power className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {/* Error banner if navigation failed or SSRF caught */}
@@ -445,6 +488,7 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
           onMouseDown={handleCanvasMouseDown}
           onMouseUp={handleCanvasMouseUp}
           onClick={handleCanvasClick}
+          onDoubleClick={handleCanvasDoubleClick}
           onWheel={handleCanvasWheel}
           className="w-full h-full object-contain"
         />

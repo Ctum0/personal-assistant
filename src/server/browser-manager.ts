@@ -128,6 +128,11 @@ export class BrowserManager {
       viewport: { width: 1280, height: 800 },
       userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Sofia/1.0',
       ignoreHTTPSErrors: false,
+      locale: 'en-US',
+      timezoneId: 'Asia/Colombo',
+      extraHTTPHeaders: {
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
     });
 
     const page = await context.newPage();
@@ -222,15 +227,27 @@ export class BrowserManager {
     const session = await this.ensureSession(sessionId);
     session.lastActivity = Date.now();
 
+    let targetUrl = url;
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname.includes('google.') && !parsed.searchParams.has('hl')) {
+        parsed.searchParams.set('hl', 'en');
+        if (!parsed.searchParams.has('gl')) {
+          parsed.searchParams.set('gl', 'lk');
+        }
+        targetUrl = parsed.toString();
+      }
+    } catch {}
+
     // Validate target destination
-    const validation = await validateDestinationUrl(url, {
+    const validation = await validateDestinationUrl(targetUrl, {
       allowLoopbackForTesting: this.allowLoopbackForTesting,
     });
     if (!validation.allowed) {
       throw new Error(`Navigation blocked by security policy: ${validation.reason}`);
     }
 
-    const response = await session.page.goto(url, {
+    const response = await session.page.goto(targetUrl, {
       waitUntil: 'domcontentloaded',
       timeout: options?.timeout || 15000,
     });

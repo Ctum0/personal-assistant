@@ -194,12 +194,31 @@ export default function AuditionPage() {
     }));
   };
 
-  const selectAsDefault = (voice: string) => {
+  const selectAsDefault = async (voice: string) => {
     setActiveVoice(voice);
     if (typeof window !== 'undefined') {
       localStorage.setItem('sofia_active_voice', voice);
+      localStorage.setItem('sofia_live_voice', voice);
     }
-    setStatusMsg(`Selected ${voice} as default voice.`);
+    setStatusMsg(`Saving ${voice} as default voice...`);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('sofia_token') || '' : '';
+      await fetch('/api/settings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          voice: {
+            live_voice: voice,
+          },
+        }),
+      });
+      setStatusMsg(`Selected ${voice} as default voice.`);
+    } catch {
+      setStatusMsg(`Selected ${voice} locally.`);
+    }
   };
 
   return (
