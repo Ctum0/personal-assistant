@@ -27,7 +27,7 @@ services:
         limits:
           cpus: "1.5"
           memory: 1024M
-          pids: 100
+          pids: 500
 
     environment:
       - NODE_ENV=production
