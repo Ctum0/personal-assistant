@@ -6,7 +6,6 @@ ENV NODE_ENV=production
 ENV BROWSER_WORKER_PORT=9222
 ENV BROWSER_WORKER_HOST=0.0.0.0
 
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
@@ -14,8 +13,8 @@ WORKDIR /app
 # Copy dependency manifests
 COPY package.json pnpm-lock.yaml* ./
 
-# Install dependencies including playwright and tsx
-RUN npm install -g pnpm tsx && pnpm install --frozen-lockfile --ignore-scripts
+# Install dependencies including playwright and tsx, then install chromium browser
+RUN npm install -g pnpm tsx && pnpm install --frozen-lockfile --ignore-scripts && npx playwright install chromium
 
 # Copy worker application code
 COPY tsconfig.json ./

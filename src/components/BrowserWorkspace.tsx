@@ -52,15 +52,49 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
     if (pane.lease_holder) setLeaseHolder(pane.lease_holder);
   }, [pane.url, pane.title, pane.lease_holder]);
 
-  // Connect to live visual screencast SSE stream
+  // Render JPEG frame onto Canvas
+  const renderFrame = useCallback((base64Jpeg: string) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const img = new Image();
+    img.onload = () => {
+      canvas.width = 1280;
+      canvas.height = 800;
+      ctx.drawImage(img, 0, 0, 1280, 800);
+    };
+    img.src = `data:image/jpeg;base64,${base64Jpeg}`;
+  }, []);
+
+  // Connect to live visual screencast SSE stream and rehydrate session
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('sofia_token') || '' : '';
-    const streamUrl = `/api/browser/sessions/${encodeURIComponent(pane.session_id)}/stream`;
+    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+    const streamUrl = `/api/browser/sessions/${encodeURIComponent(pane.session_id)}/stream${tokenParam}`;
+
+    // Initial session rehydration
+    fetch(`/api/browser/sessions/${encodeURIComponent(pane.session_id)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.session) {
+          if (data.session.current_url) {
+            setCurrentUrl(data.session.current_url);
+            setUrlInput(data.session.current_url);
+          }
+          if (data.session.title) setTitle(data.session.title);
+          if (data.session.lease_holder) setLeaseHolder(data.session.lease_holder);
+        }
+      })
+      .catch(() => {});
 
     let eventSource: EventSource | null = null;
 
     try {
-      // EventSource with auth cookie or query param if headers not supported natively in browser EventSource
+      // EventSource with query param token for seamless SSE authorization
       eventSource = new EventSource(streamUrl);
 
       eventSource.onopen = () => {
@@ -68,7 +102,7 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
         setErrorMsg(null);
       };
 
-      eventSource.addEventListener('connected', (e: MessageEvent) => {
+      eventSource.addEventListener('connected', () => {
         setConnected(true);
       });
 
@@ -85,7 +119,7 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
       eventSource.onerror = () => {
         setConnected(false);
       };
-    } catch (err: any) {
+    } catch {
       setErrorMsg('Failed to connect to live visual stream');
     }
 
@@ -94,23 +128,7 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
         eventSource.close();
       }
     };
-  }, [pane.session_id]);
-
-  // Render JPEG frame onto Canvas
-  const renderFrame = useCallback((base64Jpeg: string) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const img = new Image();
-    img.onload = () => {
-      canvas.width = 1280;
-      canvas.height = 800;
-      ctx.drawImage(img, 0, 0, 1280, 800);
-    };
-    img.src = `data:image/jpeg;base64,${base64Jpeg}`;
-  }, []);
+  }, [pane.session_id, renderFrame]);
 
   // Dispatch human interaction event to backend input API
   const sendInput = useCallback(
@@ -284,8 +302,8 @@ export const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
       onKeyDown={handleKeyDown}
       onKeyUp={handleKeyUp}
       tabIndex={0}
-      className={`browser-workspace flex flex-col rounded-2xl bg-[#0c0208]/95 border border-burgundy-800/50 shadow-[0_12px_40px_rgba(20,3,10,0.7)] backdrop-blur-2xl overflow-hidden transition-all duration-300 focus:outline-none focus:ring-1 focus:ring-rose-500/40 ${
-        expanded ? 'w-full max-w-4xl h-[620px]' : 'w-full max-w-lg h-[460px]'
+      className={`browser-workspace flex flex-col rounded-2xl bg-[#0c0208]/95 border border-burgundy-800/50 shadow-[0_12px_40px_rgba(20,3,10,0.7)] backdrop-blur-2xl overflow-hidden transition-all duration-300 focus:outline-none focus:ring-1 focus:ring-rose-500/40 w-full ${
+        expanded ? 'h-[680px]' : 'h-[540px] md:h-[580px] lg:h-[620px]'
       }`}
     >
       {/* Top Bar: Navigation controls + URL bar + Lease Pill */}

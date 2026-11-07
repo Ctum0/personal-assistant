@@ -2,8 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { buildPersonaPrompt } from './persona';
 import { getDayScore, getDayStats, getSettings } from './db';
 import { SofiaExpression, SofiaSettings } from './types';
-import { evaluateConsequenceRequest } from './policy';
-import { Pane, SofiaTurn, SofiaMood, ApprovalPane } from './stage';
+import { Pane, SofiaTurn, SofiaMood, ApprovalPane, BrowserPane } from './stage';
 import { executeTool, buildOpenAITools, buildGeminiFunctionDeclarations } from './tools';
 import { getHermesClient, getHermesConfig } from './hermes';
 import { registerRun, updateRunRecord, hashSessionKey, recordApprovalRequest } from './hermes/registry';
@@ -652,12 +651,52 @@ async function dispatchToHermesPrimary(
       output: rawOutput,
       progressMeta: status.usage ? { usage: status.usage } : undefined,
     });
+
+    let panes = turn.panes || [];
+    if (!panes.some((p) => p.kind === 'browser')) {
+      try {
+        const convId = conversationId || 'conv_main';
+        const activeSession = db
+          .prepare(
+            `SELECT * FROM browser_sessions 
+             WHERE (conversation_id = ? OR conversation_id = 'conv_main' OR conversation_id = 'default')
+               AND status != 'closed'
+             ORDER BY updated_at DESC LIMIT 1`
+          )
+          .get(convId) as any;
+
+        if (activeSession) {
+          const sessionUpdated = new Date(activeSession.updated_at).getTime();
+          const turnStarted = startTime;
+          const isTurnRecent = sessionUpdated >= turnStarted - 5000;
+          const mentionsBrowsing = /open|browse|navigate|search|website|github|web|inspect|page/i.test(
+            userMessage + ' ' + (turn.text || '')
+          );
+
+          if (isTurnRecent || mentionsBrowsing) {
+            const browserPane: BrowserPane = {
+              id: `pane-browser-${activeSession.id}`,
+              title: activeSession.title || 'Browser Workspace',
+              kind: 'browser',
+              session_id: activeSession.id,
+              url: activeSession.current_url || 'https://github.com',
+              lease_holder: activeSession.lease_holder || 'HUMAN',
+              status: activeSession.status || 'active',
+            };
+            panes = [browserPane, ...panes];
+          }
+        }
+      } catch (sessErr) {
+        console.warn('Failed to resolve active browser session for panes:', sessErr);
+      }
+    }
+
     return {
       text: turn.text || turn.say,
       say: turn.say,
       mood: turn.mood as SofiaExpression,
-      panes: turn.panes,
-      turn,
+      panes: panes.length > 0 ? panes : undefined,
+      turn: { ...turn, panes: panes.length > 0 ? panes : undefined },
       runId: run.run_id,
       sofiaRunId,
       isHermes: true,

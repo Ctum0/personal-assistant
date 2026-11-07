@@ -36,19 +36,21 @@ export const Stage: React.FC<StageProps> = ({
 }) => {
   const paneCount = panes.length;
   const hasBrowserPane = panes.some((p) => p.kind === 'browser');
+  const hasLargeWorkspace = hasBrowserPane || panes.some((p) => p.kind === 'code' || p.kind === 'table');
 
-  // Compute CSS custom property targets for Jarvis dynamic Stage layout
+  // Compute CSS custom property targets for dynamic Stage layout
   let sofiaScale = 1;
   let sofiaShift = '0%';
 
-  if (hasBrowserPane) {
-    sofiaScale = 0.52;
-    sofiaShift = '-35%';
+  if (hasLargeWorkspace) {
+    // Keep Sofia prominent (0.88x scale) anchored gracefully on the left
+    sofiaScale = 0.88;
+    sofiaShift = '-36%';
   } else if (paneCount === 1) {
-    sofiaScale = 0.75;
+    sofiaScale = 0.90;
     sofiaShift = '-22%';
   } else if (paneCount >= 2) {
-    sofiaScale = 0.58;
+    sofiaScale = 0.82;
     sofiaShift = '-30%';
   }
 

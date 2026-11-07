@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { stopSpeaking, isSpeakingNow } from '@/lib/voice';
 
 export type VoiceInputState =
   | 'idle'
@@ -15,7 +16,10 @@ export type VoiceInputState =
 export interface UseVoiceInputOptions {
   onFinalTranscript?: (transcript: string) => void;
   onStateChange?: (state: VoiceInputState) => void;
-  silenceTimeoutMs?: number; // default 1500ms
+  silenceTimeoutMs?: number; // default 1100ms
+  continuous?: boolean;
+  isSofiaSpeaking?: boolean;
+  onBargeIn?: () => void;
 }
 
 export interface UseVoiceInputReturn {
@@ -33,7 +37,9 @@ export interface UseVoiceInputReturn {
 }
 
 export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInputReturn {
-  const { onFinalTranscript, onStateChange, silenceTimeoutMs = 1500 } = options;
+  const { onFinalTranscript, onStateChange, silenceTimeoutMs = 1100 } = options;
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const [voiceState, setVoiceStateInternal] = useState<VoiceInputState>('idle');
   const [transcript, setTranscript] = useState('');
@@ -49,6 +55,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
   const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const selectedMimeTypeRef = useRef<string>('audio/webm');
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -108,7 +115,11 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
   const sendAudioForTranscription = useCallback(
     async (chunks: Blob[], mimeType: string) => {
       if (chunks.length === 0) {
-        updateState('idle');
+        if (listeningRef.current) {
+          updateState('listening');
+        } else {
+          updateState('idle');
+        }
         return;
       }
 
@@ -139,13 +150,21 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
           commitTranscript(recognizedText);
         } else {
           setInterimTranscript('');
-          updateState('idle');
+          if (listeningRef.current) {
+            updateState('listening');
+          } else {
+            updateState('idle');
+          }
         }
       } catch (err: any) {
         console.warn('STT transcription error:', err);
         setError('Voice transcription failed. You can also type your message.');
         setInterimTranscript('');
-        updateState('idle');
+        if (listeningRef.current) {
+          updateState('listening');
+        } else {
+          updateState('idle');
+        }
       }
     },
     [commitTranscript, updateState]
@@ -227,6 +246,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
           }
         }
       }
+      selectedMimeTypeRef.current = selectedMimeType;
 
       const recorder = new MediaRecorder(stream, { mimeType: selectedMimeType });
       mediaRecorderRef.current = recorder;
@@ -248,7 +268,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
         }
       };
 
-      recorder.start(250); // Collect in 250ms slices
+      recorder.start(200); // Collect in 200ms slices for agile endpointing
       listeningRef.current = true;
       updateState('listening');
 
@@ -266,9 +286,19 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
           }
           const rms = Math.sqrt(sumSquares / buffer.length);
           const now = Date.now();
-          const SPEECH_THRESHOLD = 0.02;
+          const SPEECH_THRESHOLD = 0.022;
 
-          if (rms > SPEECH_THRESHOLD) {
+          // Barge-in detection while Sofia is speaking
+          const isSofiaSpeaking = optionsRef.current.isSofiaSpeaking || isSpeakingNow();
+          if (rms > SPEECH_THRESHOLD && isSofiaSpeaking) {
+            stopSpeaking();
+            optionsRef.current.onBargeIn?.();
+            lastSpokenTimeRef.current = now;
+            hasSpokenRef.current = true;
+            setInterimTranscript('Recording speech...');
+            setSilenceCountdown(0);
+            updateState('listening');
+          } else if (rms > SPEECH_THRESHOLD) {
             lastSpokenTimeRef.current = now;
             hasSpokenRef.current = true;
             setInterimTranscript('Recording speech...');
@@ -279,9 +309,26 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
             setSilenceCountdown(ratio);
 
             if (elapsedSilence >= silenceTimeoutMs) {
-              // Silence threshold exceeded: stop recording and transcribe
-              stopListening();
-              return;
+              if (optionsRef.current.continuous !== false) {
+                // Sliced utterance capture in continuous mode
+                if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                  try {
+                    mediaRecorderRef.current.requestData();
+                  } catch {}
+                }
+                setTimeout(() => {
+                  const chunks = [...audioChunksRef.current];
+                  audioChunksRef.current = [];
+                  hasSpokenRef.current = false;
+                  setSilenceCountdown(0);
+                  if (chunks.length > 0) {
+                    sendAudioForTranscription(chunks, selectedMimeTypeRef.current);
+                  }
+                }, 40);
+              } else {
+                stopListening();
+                return;
+              }
             }
           }
 

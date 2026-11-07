@@ -53,9 +53,15 @@ export const PaneRail: React.FC<PaneRailProps> = ({
     displayPanes = panes;
   }
 
+  const hasLargeWorkspace = panes.some((p) => p.kind === 'browser' || p.kind === 'code' || p.kind === 'table');
+
   return (
     <aside
-      className="pane-host flex flex-col gap-4 w-full md:w-[380px] lg:w-[420px] transition-all duration-500 ease-out z-20"
+      className={`pane-host flex flex-col gap-4 w-full transition-all duration-500 ease-out z-20 ${
+        hasLargeWorkspace
+          ? 'md:w-[680px] lg:w-[860px] xl:w-[980px] max-w-[calc(100vw-2rem)]'
+          : 'md:w-[380px] lg:w-[420px]'
+      }`}
       aria-label="Companion Dynamic Panes"
     >
       {/* Tab switcher when > 2 panes exist */}

@@ -115,7 +115,12 @@ export default function SofiaStageHome() {
         handleSendMessage(transcript.trim(), 'voice');
       }
     },
-    silenceTimeoutMs: 1400,
+    silenceTimeoutMs: 1100,
+    continuous: true,
+    isSofiaSpeaking: isSpeaking,
+    onBargeIn: () => {
+      setIsSpeaking(false);
+    },
   });
 
   // Expose test harness on window for automated browser voice testing
@@ -500,7 +505,12 @@ export default function SofiaStageHome() {
       if (!turnSay) turnSay = "I've processed your update.";
 
       // If full text contains extra information beyond spoken caption, project detailed pane
-      if (turnText && turnText.length > turnSay.length + 40 && !turnPanes.some((p) => p.kind === 'text' || p.kind === 'code')) {
+      // But NEVER displace a rich browser, code, or stat pane with a generic notes pane
+      if (
+        turnText &&
+        turnText.length > turnSay.length + 40 &&
+        !turnPanes.some((p) => p.kind === 'text' || p.kind === 'code' || p.kind === 'browser')
+      ) {
         turnPanes.push({
           id: `pane-notes-${Date.now()}`,
           title: 'Notes & Details',
@@ -517,10 +527,12 @@ export default function SofiaStageHome() {
       if (turnPanes && turnPanes.length > 0) {
         setPanes((prev) => {
           const pinned = prev.filter((p) => p.pinned);
+          const hasNewBrowser = turnPanes.some((p) => p.kind === 'browser');
+          const unpinnedPrev = prev.filter((p) => !p.pinned && (!hasNewBrowser || p.kind !== 'browser'));
           const newUnpinned = turnPanes.filter(
-            (np) => !pinned.some((p) => p.id === np.id)
+            (np) => !pinned.some((p) => p.id === np.id) && !unpinnedPrev.some((p) => p.id === np.id)
           );
-          return [...pinned, ...newUnpinned];
+          return [...pinned, ...newUnpinned, ...unpinnedPrev].slice(0, 4);
         });
       }
 

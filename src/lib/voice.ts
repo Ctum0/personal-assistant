@@ -1,11 +1,12 @@
 'use client';
 
-let currentAudio: HTMLAudioElement | null = null;
-let currentUtterance: SpeechSynthesisUtterance | null = null;
+let activeAudio: HTMLAudioElement | null = null;
+let activeUtterance: SpeechSynthesisUtterance | null = null;
 let audioContext: AudioContext | null = null;
 let isAudioUnlocked = false;
 let activeAbortController: AbortController | null = null;
-let playbackGeneration = 0;
+let currentPlaybackTurnId = 0;
+let isPlaybackActive = false;
 
 export interface SpeakOptions {
   provider?: string;
@@ -18,7 +19,7 @@ export interface SpeakOptions {
 }
 
 /**
- * Resolves the client authentication headers for API requests.
+ * Resolves client authentication headers for API requests.
  */
 function getClientAuthHeaders(explicitToken?: string): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -45,7 +46,7 @@ function getClientAuthHeaders(explicitToken?: string): Record<string, string> {
 }
 
 /**
- * Audio Unlocker: Initializes and resumes AudioContext on the first user interaction
+ * Audio Unlocker: Initializes and resumes AudioContext on user interaction
  * so speech playback is unlocked across mobile and desktop browsers.
  */
 export function unlockAudio() {
@@ -75,26 +76,35 @@ export function unlockAudio() {
 }
 
 /**
- * Barge-in / interruption: Instantly halt any active audio or browser speech playback.
+ * Centralized Voice Cancellation:
+ * Instantly halts any active Edge TTS audio, queued sentence buffers,
+ * in-flight network requests, and browser speech synthesis.
  */
-export function stopSpeaking() {
-  playbackGeneration++;
+export function stopSpeaking(): void {
+  currentPlaybackTurnId++;
+  isPlaybackActive = false;
+
   if (activeAbortController) {
-    activeAbortController.abort();
+    try {
+      activeAbortController.abort();
+    } catch {}
     activeAbortController = null;
   }
-  if (currentAudio) {
+
+  if (activeAudio) {
     try {
-      currentAudio.pause();
-      currentAudio.currentTime = 0;
+      activeAudio.pause();
+      activeAudio.currentTime = 0;
+      activeAudio.src = '';
     } catch {}
-    currentAudio = null;
+    activeAudio = null;
   }
+
   if (typeof window !== 'undefined' && window.speechSynthesis) {
     try {
       window.speechSynthesis.cancel();
     } catch {}
-    currentUtterance = null;
+    activeUtterance = null;
   }
 }
 
@@ -102,9 +112,8 @@ export function stopSpeaking() {
  * Returns whether Sofia is currently outputting audible speech.
  */
 export function isSpeakingNow(): boolean {
-  if (currentAudio && !currentAudio.paused && !currentAudio.ended) {
-    return true;
-  }
+  if (isPlaybackActive) return true;
+  if (activeAudio && !activeAudio.paused && !activeAudio.ended) return true;
   if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking) {
     return true;
   }
@@ -112,7 +121,7 @@ export function isSpeakingNow(): boolean {
 }
 
 /**
- * Splits text into natural sentence chunks for rapid streaming delivery.
+ * Splits text into natural conversational sentence chunks for rapid streaming delivery.
  */
 function splitIntoSentences(text: string): string[] {
   const rawSentences = text
@@ -159,7 +168,7 @@ async function fetchTtsAudio(
     credentials: 'same-origin',
     body: JSON.stringify({
       text: sentence,
-      provider: options.provider,
+      provider: options.provider || 'edge',
       voiceId: options.voiceId,
     }),
     signal,
@@ -174,11 +183,11 @@ async function fetchTtsAudio(
 }
 
 /**
- * Sentence-Buffered Speech Synthesis:
- * 1. Splits speech into conversational sentences.
- * 2. Fetches Sentence 1 immediately to minimize TTFA (~400-800ms).
- * 3. Prefetches remaining sentences while playing.
- * 4. Gracefully falls back to Web Speech API on failure.
+ * Central Sofia Audio Controller:
+ * - Exactly ONE voice stream active at a time (Edge TTS as canonical voice).
+ * - Immediate Time to First Audio (TTFA < 1.5s) via sentence-1 streaming.
+ * - Concurrently prefetches sentence queue in background.
+ * - Strictly prevents dual-playback or overlapping speech synthesis.
  */
 export async function speakSofia(
   text: string,
@@ -195,9 +204,9 @@ export async function speakSofia(
   }
 
   unlockAudio();
-  stopSpeaking();
+  stopSpeaking(); // Halts any prior playback and increments turn ID
 
-  const currentGen = playbackGeneration;
+  const turnId = currentPlaybackTurnId;
   const abortController = new AbortController();
   activeAbortController = abortController;
 
@@ -209,34 +218,34 @@ export async function speakSofia(
 
   const startTime = Date.now();
   let firstAudioTriggered = false;
+  isPlaybackActive = true;
 
   try {
-    // Pipeline: queue of audio promises
+    // Pipeline: fetch audio promises for all sentences in parallel
     const audioPromises: Promise<string | null>[] = sentences.map((sentence) =>
       fetchTtsAudio(sentence, options, abortController.signal).catch(() => null)
     );
 
-    // Play each sentence sequentially
     for (let i = 0; i < audioPromises.length; i++) {
-      if (playbackGeneration !== currentGen) return;
+      if (currentPlaybackTurnId !== turnId) return;
 
       const audioUrl = await audioPromises[i];
-      if (playbackGeneration !== currentGen) {
+      if (currentPlaybackTurnId !== turnId) {
         if (audioUrl) URL.revokeObjectURL(audioUrl);
         return;
       }
 
       if (!audioUrl) {
-        // If TTS API failed on the first sentence, fall back to browser Web Speech
-        if (i === 0) {
-          fallbackBrowserSpeech(cleanText, options);
+        // Only if sentence 0 completely failed and no audio has played yet, invoke controlled fallback
+        if (i === 0 && !firstAudioTriggered) {
+          fallbackBrowserSpeech(cleanText, options, turnId);
           return;
         }
         continue;
       }
 
       await new Promise<void>((resolve) => {
-        if (playbackGeneration !== currentGen) {
+        if (currentPlaybackTurnId !== turnId) {
           URL.revokeObjectURL(audioUrl);
           resolve();
           return;
@@ -244,10 +253,10 @@ export async function speakSofia(
 
         const audio = new Audio();
         audio.src = audioUrl;
-        currentAudio = audio;
+        activeAudio = audio;
 
         audio.onplay = () => {
-          if (!firstAudioTriggered) {
+          if (!firstAudioTriggered && currentPlaybackTurnId === turnId) {
             firstAudioTriggered = true;
             const ttfa = Date.now() - startTime;
             options.onTTFA?.(ttfa);
@@ -256,8 +265,8 @@ export async function speakSofia(
         };
 
         const finish = () => {
-          if (currentAudio === audio) {
-            currentAudio = null;
+          if (activeAudio === audio) {
+            activeAudio = null;
           }
           URL.revokeObjectURL(audioUrl);
           resolve();
@@ -277,31 +286,51 @@ export async function speakSofia(
       });
     }
 
-    if (playbackGeneration === currentGen) {
+    if (currentPlaybackTurnId === turnId) {
+      isPlaybackActive = false;
       options.onEnd?.();
     }
   } catch (err: any) {
-    if (err.name === 'AbortError') return;
-    console.warn('/api/tts fetch failed, using browser fallback:', err);
-    fallbackBrowserSpeech(cleanText, options);
+    if (err.name === 'AbortError' || currentPlaybackTurnId !== turnId) return;
+    console.warn('/api/tts fetch failed, attempting emergency fallback:', err);
+    if (!firstAudioTriggered && currentPlaybackTurnId === turnId) {
+      fallbackBrowserSpeech(cleanText, options, turnId);
+    }
   } finally {
     if (activeAbortController === abortController) {
       activeAbortController = null;
     }
+    if (currentPlaybackTurnId === turnId) {
+      isPlaybackActive = false;
+    }
   }
 }
 
-function fallbackBrowserSpeech(text: string, options: SpeakOptions = {}) {
-  if (typeof window === 'undefined' || !window.speechSynthesis) {
+/**
+ * Controlled Emergency Fallback:
+ * Executes ONLY when Edge TTS network request fails completely.
+ * Never runs concurrently with Audio elements.
+ */
+function fallbackBrowserSpeech(text: string, options: SpeakOptions = {}, turnId: number) {
+  if (typeof window === 'undefined' || !window.speechSynthesis || currentPlaybackTurnId !== turnId) {
     options.onEnd?.();
     return;
+  }
+
+  // Ensure all audio elements are completely torn down
+  if (activeAudio) {
+    try {
+      activeAudio.pause();
+      activeAudio.src = '';
+    } catch {}
+    activeAudio = null;
   }
 
   try {
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
-    currentUtterance = utterance;
+    activeUtterance = utterance;
     utterance.rate = 1.02;
     utterance.pitch = 1.15;
 
@@ -339,30 +368,38 @@ function fallbackBrowserSpeech(text: string, options: SpeakOptions = {}) {
       utterance.voice = voice;
     } else {
       window.speechSynthesis.onvoiceschanged = () => {
-        const v = selectVoice();
-        if (v) utterance.voice = v;
+        if (currentPlaybackTurnId === turnId) {
+          const v = selectVoice();
+          if (v) utterance.voice = v;
+        }
       };
     }
 
     utterance.onstart = () => {
-      options.onStart?.();
+      if (currentPlaybackTurnId === turnId) {
+        options.onStart?.();
+      }
     };
 
     utterance.onend = () => {
-      currentUtterance = null;
-      options.onEnd?.();
+      activeUtterance = null;
+      if (currentPlaybackTurnId === turnId) {
+        options.onEnd?.();
+      }
     };
 
     utterance.onerror = (e) => {
       console.warn('SpeechSynthesis error:', e);
-      currentUtterance = null;
-      options.onError?.(e);
-      options.onEnd?.();
+      activeUtterance = null;
+      if (currentPlaybackTurnId === turnId) {
+        options.onError?.(e);
+        options.onEnd?.();
+      }
     };
 
     window.speechSynthesis.speak(utterance);
   } catch (err) {
-    currentUtterance = null;
+    activeUtterance = null;
     options.onError?.(err);
     options.onEnd?.();
   }

@@ -85,6 +85,12 @@ export function verifyApiAuth(req: NextRequest): { authorized: boolean; response
     return { authorized: true };
   }
 
+  // 3b. Check URL query parameter token (specifically for browser EventSource SSE streams)
+  const queryToken = req.nextUrl.searchParams.get('token')?.trim();
+  if (queryToken && validTokens.includes(queryToken)) {
+    return { authorized: true };
+  }
+
   // 4. Ingest route device token check
   if (pathname.startsWith('/api/ingest')) {
     const deviceToken = req.headers.get('x-device-token')?.trim();
