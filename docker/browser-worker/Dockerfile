@@ -6,13 +6,16 @@ ENV NODE_ENV=production
 ENV BROWSER_WORKER_PORT=9222
 ENV BROWSER_WORKER_HOST=0.0.0.0
 
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 WORKDIR /app
 
 # Copy dependency manifests
 COPY package.json pnpm-lock.yaml* ./
 
-# Install only production dependencies
-RUN npm install -g pnpm && pnpm install --prod --frozen-lockfile || npm install --omit=dev
+# Install dependencies including playwright and tsx
+RUN npm install -g pnpm tsx && pnpm install --frozen-lockfile
 
 # Copy worker application code
 COPY tsconfig.json ./
@@ -33,4 +36,4 @@ EXPOSE 9222
 HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=3 \
   CMD node -e "http.get('http://127.0.0.1:9222/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
 
-CMD ["npx", "tsx", "scripts/browser-worker.ts"]
+CMD ["tsx", "scripts/browser-worker.ts"]

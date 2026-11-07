@@ -37,9 +37,8 @@ services:
 
     # Private internal network only - no public host port exposure
     networks:
-      - sofia-browser-isolated
+      - coolify
 
 networks:
-  sofia-browser-isolated:
-    driver: bridge
-    internal: false # Requires outbound WAN for public browsing, but isolated from host ports
+  coolify:
+    external: true
