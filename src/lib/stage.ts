@@ -117,6 +117,11 @@ export interface BrowserPane extends BasePane {
   expanded?: boolean;
 }
 
+export interface TextPane extends BasePane {
+  kind: 'text';
+  text: string;
+}
+
 export type Pane =
   | ChartPane
   | StatPane
@@ -127,10 +132,12 @@ export type Pane =
   | TodoPane
   | CodePane
   | ApprovalPane
-  | BrowserPane;
+  | BrowserPane
+  | TextPane;
 
 export interface SofiaTurn {
   say: string;
+  text?: string;
   mood: SofiaMood;
   panes?: Pane[];
 }

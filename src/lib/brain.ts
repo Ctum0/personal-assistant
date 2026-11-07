@@ -21,6 +21,11 @@ export interface SofiaTurnResult {
   isHermes?: boolean;
   degraded?: boolean;
   error?: string;
+  errorCategory?: 'gateway_unreachable' | 'auth_failure' | 'run_submission_failed' | 'run_timeout' | 'run_execution_failed' | 'browser_worker_unavailable';
+  timingMetrics?: {
+    durationMs: number;
+    pollCount?: number;
+  };
 }
 
 export interface BrainTurnOptions {
@@ -138,6 +143,33 @@ export function extractMood(response: string): { text: string; mood: SofiaExpres
   return { text: response.trim(), mood: 'neutral' };
 }
 
+export function extractSpokenSummary(fullText: string): string {
+  if (!fullText || typeof fullText !== 'string') return "I'm on it.";
+
+  const cleaned = fullText
+    .replace(/```[\s\S]*?```/g, '') // remove large code blocks from spoken line
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // simplify links to anchor text
+    .replace(/[*_#`~>]/g, '') // strip markdown emphasis and headers
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) return "I'm on it.";
+  if (cleaned.length <= 220) return cleaned;
+
+  // Split on sentence boundaries
+  const sentences = cleaned.match(/[^.!?]+[.!?]+(?:\s|$)/g);
+  if (!sentences || sentences.length === 0) {
+    return cleaned.slice(0, 200).trim() + '...';
+  }
+
+  // Combine 1 or 2 sentences for concise, natural spoken voice delivery
+  let summary = sentences[0].trim();
+  if (sentences.length > 1 && (summary.length + sentences[1].trim().length) <= 220) {
+    summary += ' ' + sentences[1].trim();
+  }
+  return summary;
+}
+
 export function parseTurn(raw: string): SofiaTurn {
   const VALID_MOODS: SofiaMood[] = [
     'neutral',
@@ -151,7 +183,7 @@ export function parseTurn(raw: string): SofiaTurn {
   ];
 
   if (!raw || typeof raw !== 'string') {
-    return { say: "I'm listening.", mood: 'neutral' };
+    return { say: "I'm listening.", text: "I'm listening.", mood: 'neutral' };
   }
 
   // 1. Strip markdown ```json ... ``` code fences
@@ -163,9 +195,14 @@ export function parseTurn(raw: string): SofiaTurn {
   try {
     const parsed = JSON.parse(cleaned);
     let say = typeof parsed.say === 'string' && parsed.say.trim() ? parsed.say.trim() : '';
-    if (!say && typeof parsed.content === 'string') say = parsed.content.trim();
-    if (!say && typeof parsed.reply === 'string') say = parsed.reply.trim();
-    if (!say) say = raw.trim();
+    let text = typeof parsed.text === 'string' && parsed.text.trim() ? parsed.text.trim() : '';
+    if (!text && typeof parsed.content === 'string') text = parsed.content.trim();
+    if (!text && typeof parsed.reply === 'string') text = parsed.reply.trim();
+    if (!text && !say) text = raw.trim();
+    if (!text && say) text = say;
+    if (!say && text) {
+      say = extractSpokenSummary(text);
+    }
 
     let mood: SofiaMood = 'neutral';
     if (typeof parsed.mood === 'string' && VALID_MOODS.includes(parsed.mood.toLowerCase() as SofiaMood)) {
@@ -183,13 +220,15 @@ export function parseTurn(raw: string): SofiaTurn {
       panes = parsed.panes.filter((p: any) => p && typeof p === 'object' && p.kind).slice(0, 4);
     }
 
-    return { say, mood, panes };
+    return { say, text, mood, panes };
   } catch {
     const extracted = extractMood(raw);
     const validMood = VALID_MOODS.includes(extracted.mood as SofiaMood)
       ? (extracted.mood as SofiaMood)
       : 'neutral';
-    return { say: extracted.text, mood: validMood };
+    const text = extracted.text;
+    const say = extractSpokenSummary(text);
+    return { say, text, mood: validMood };
   }
 }
 
@@ -466,12 +505,106 @@ ${pinnedNotes.map((n, i) => `${i + 1}. ${n.text}`).join('\n')}`;
   };
 }
 
+export function diagnoseBrainError(
+  err: any,
+  sofiaRunId: string,
+  runId?: string,
+  durationMs: number = 0
+): {
+  category: 'gateway_unreachable' | 'auth_failure' | 'run_submission_failed' | 'run_timeout' | 'run_execution_failed' | 'browser_worker_unavailable';
+  code: string;
+  message: string;
+  say: string;
+  text: string;
+} {
+  const rawMsg = String(err?.message || err || '');
+  const lowerMsg = rawMsg.toLowerCase();
+
+  if (
+    rawMsg.includes('BROWSER_WORKER_URL') ||
+    rawMsg.includes('Production Browser Isolation Error') ||
+    (rawMsg.includes('9222') && rawMsg.includes('ECONNREFUSED'))
+  ) {
+    return {
+      category: 'browser_worker_unavailable',
+      code: 'ERR_BROWSER_WORKER_UNAVAILABLE',
+      message: rawMsg,
+      say: 'The isolated browser workspace worker is currently unreachable.',
+      text: `Browser Worker Unavailable: Sofia could not reach the browser worker service (${rawMsg}). Please verify that the \`sofia-browser-worker\` container is running on the private network. [ID: ${sofiaRunId}]`,
+    };
+  }
+
+  if (
+    rawMsg.includes('401') ||
+    rawMsg.includes('403') ||
+    lowerMsg.includes('unauthorized') ||
+    lowerMsg.includes('invalid api key')
+  ) {
+    return {
+      category: 'auth_failure',
+      code: 'ERR_HERMES_AUTH_FAILED',
+      message: rawMsg,
+      say: 'Hermes authentication failed. Please check the configured API credentials.',
+      text: `Hermes Authentication Failure: The Hermes gateway rejected Sofia's API credentials (${rawMsg}). Please check the \`HERMES_API_KEY\` setting. [ID: ${sofiaRunId}]`,
+    };
+  }
+
+  if (
+    rawMsg.includes('ECONNREFUSED') ||
+    lowerMsg.includes('connection refused') ||
+    lowerMsg.includes('unreachable') ||
+    lowerMsg.includes('network timeout') ||
+    rawMsg.includes('fetch failed') ||
+    rawMsg.includes('ENOTFOUND') ||
+    rawMsg.includes('status 502') ||
+    rawMsg.includes('status 503') ||
+    lowerMsg.includes('cannot connect')
+  ) {
+    return {
+      category: 'gateway_unreachable',
+      code: 'ERR_HERMES_GATEWAY_UNREACHABLE',
+      message: rawMsg,
+      say: 'I cannot connect to the Hermes execution engine. Operating in degraded mode.',
+      text: `Hermes Gateway Unreachable: Sofia could not connect to Hermes at the configured endpoint (${rawMsg}). Ensure the \`hermes-sofia\` gateway container is active. [ID: ${sofiaRunId}]`,
+    };
+  }
+
+  if (rawMsg.includes('timed out') || rawMsg.includes('timeout')) {
+    return {
+      category: 'run_timeout',
+      code: 'ERR_HERMES_RUN_TIMEOUT',
+      message: rawMsg,
+      say: 'That task took longer than expected to finish on Hermes, but it may still be executing in the background.',
+      text: `Hermes Run Timeout: The execution run ${runId || 'unassigned'} exceeded the polling deadline (${Math.round(durationMs / 1000)}s). The task may still be in progress on Hermes. [Correlation ID: ${sofiaRunId}]`,
+    };
+  }
+
+  if (rawMsg.includes('createRun failed') || rawMsg.includes('Run submission')) {
+    return {
+      category: 'run_submission_failed',
+      code: 'ERR_RUN_SUBMISSION_FAILED',
+      message: rawMsg,
+      say: 'Hermes rejected this task submission.',
+      text: `Run Submission Rejected: The Hermes gateway refused to create run: ${rawMsg}. [Correlation ID: ${sofiaRunId}]`,
+    };
+  }
+
+  return {
+    category: 'run_execution_failed',
+    code: 'ERR_HERMES_EXECUTION_FAILED',
+    message: rawMsg,
+    say: 'Hermes encountered an execution error while processing this turn.',
+    text: `Hermes Execution Error: ${rawMsg} [Run: ${runId || 'none'}, Correlation: ${sofiaRunId}]`,
+  };
+}
+
 async function dispatchToHermesPrimary(
   db: DatabaseSync,
   userMessage: string,
   history: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }> = [],
   options: BrainTurnOptions = {}
 ): Promise<SofiaTurnResult> {
+  const startTime = Date.now();
   const conversationId = options.conversationId || options.sessionId || 'default';
   const sofiaRunId = `srun_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const settings = getSettings(db);
@@ -501,10 +634,14 @@ async function dispatchToHermesPrimary(
     prompt: userMessage,
   });
 
+  let pollCount = 0;
   // Poll for completion (up to 90s for multi-step tool execution)
   const status = await client.pollRunUntilComplete(run.run_id, {
     maxWaitMs: 90000,
     intervalMs: 1200,
+    onPoll: () => {
+      pollCount++;
+    },
   });
 
   if (status.status === 'completed') {
@@ -516,7 +653,7 @@ async function dispatchToHermesPrimary(
       progressMeta: status.usage ? { usage: status.usage } : undefined,
     });
     return {
-      text: turn.say,
+      text: turn.text || turn.say,
       say: turn.say,
       mood: turn.mood as SofiaExpression,
       panes: turn.panes,
@@ -524,6 +661,10 @@ async function dispatchToHermesPrimary(
       runId: run.run_id,
       sofiaRunId,
       isHermes: true,
+      timingMetrics: {
+        durationMs: Date.now() - startTime,
+        pollCount,
+      },
     };
   }
 
@@ -566,11 +707,12 @@ async function dispatchToHermesPrimary(
 
     const turn: SofiaTurn = {
       say: natural.say,
+      text: natural.say,
       mood: natural.mood,
       panes: [approvalPane],
     };
     return {
-      text: turn.say,
+      text: turn.text || turn.say,
       say: turn.say,
       mood: turn.mood as SofiaExpression,
       panes: turn.panes,
@@ -578,13 +720,18 @@ async function dispatchToHermesPrimary(
       runId: run.run_id,
       sofiaRunId,
       isHermes: true,
+      timingMetrics: {
+        durationMs: Date.now() - startTime,
+        pollCount,
+      },
     };
   }
 
-  // If still running after 30s: Asynchronous task tracking
+  // If still running after 90s: Asynchronous task tracking
   if (status.status === 'running' || status.status === 'started' || status.status === 'queued') {
     const turn: SofiaTurn = {
       say: "I'm executing that task in the background. You can track progress on the Stage.",
+      text: `Task in progress on Hermes (Run ID: ${run.run_id}). Status: ${status.status}`,
       mood: 'focused',
       panes: [
         {
@@ -599,7 +746,7 @@ async function dispatchToHermesPrimary(
       ],
     };
     return {
-      text: turn.say,
+      text: turn.text || turn.say,
       say: turn.say,
       mood: turn.mood as SofiaExpression,
       panes: turn.panes,
@@ -607,6 +754,10 @@ async function dispatchToHermesPrimary(
       runId: run.run_id,
       sofiaRunId,
       isHermes: true,
+      timingMetrics: {
+        durationMs: Date.now() - startTime,
+        pollCount,
+      },
     };
   }
 
@@ -621,14 +772,18 @@ async function dispatchToHermesPrimary(
   });
   const say = isFailed && errMsg ? `${natural.say} (${errMsg})` : natural.say;
   return {
-    text: say,
+    text: status.output || say,
     say,
     mood: natural.mood as SofiaExpression,
-    turn: { say, mood: natural.mood },
+    turn: { say, text: status.output || say, mood: natural.mood },
     runId: run.run_id,
     sofiaRunId,
     isHermes: true,
     error: errMsg,
+    timingMetrics: {
+      durationMs: Date.now() - startTime,
+      pollCount,
+    },
   };
 }
 
@@ -638,34 +793,47 @@ export async function processSofiaBrainTurn(
   history: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }> = [],
   options: BrainTurnOptions = {}
 ): Promise<SofiaTurnResult> {
+  const startTime = Date.now();
   const settings = getSettings(db);
 
   if (isHermesPrimaryEnabled()) {
     try {
       return await dispatchToHermesPrimary(db, userMessage, history, options);
     } catch (err: any) {
-      console.warn('Hermes primary dispatch failed:', err?.message || err);
+      const durationMs = Date.now() - startTime;
+      const sofiaRunId = `srun_${Date.now()}_err`;
+      const diagnosis = diagnoseBrainError(err, sofiaRunId, undefined, durationMs);
+      console.warn(`[Brain] Hermes dispatch failed [${diagnosis.category}]:`, diagnosis.message);
 
       if (isLegacyBrainFallbackEnabled()) {
         const legacy = await generateLegacyBrainTurn(db, userMessage, history);
-        const text = `[Operating in degraded mode: Hermes agent unreachable]\n\n${legacy.text}`;
         return {
           ...legacy,
-          text,
-          say: legacy.say,
+          text: `[Operating in degraded mode: Hermes agent unreachable]\n\n${legacy.text}`,
           degraded: true,
+          error: diagnosis.message,
+          errorCategory: diagnosis.category,
+          sofiaRunId,
         };
       }
 
-      // Explicit report of degraded mode when fallback is not configured
-      const say = "I cannot connect to the Hermes execution engine. Operating in degraded mode.";
+      // Explicit report of categorized error state with diagnostic information
       return {
-        text: say,
-        say,
+        text: diagnosis.text,
+        say: diagnosis.say,
         mood: 'concerned',
-        turn: { say, mood: 'concerned' },
+        turn: {
+          say: diagnosis.say,
+          text: diagnosis.text,
+          mood: 'concerned',
+        },
         degraded: true,
-        error: err?.message || String(err),
+        error: diagnosis.message,
+        errorCategory: diagnosis.category,
+        sofiaRunId,
+        timingMetrics: {
+          durationMs,
+        },
       };
     }
   }
@@ -674,7 +842,7 @@ export async function processSofiaBrainTurn(
     const legacy = await generateLegacyBrainTurn(db, userMessage, history);
     return {
       ...legacy,
-      text: `[Operating in degraded mode: Hermes agent unreachable]\n\n${legacy.text}`,
+      text: `[Operating in legacy mode: Hermes agent disabled]\n\n${legacy.text}`,
       degraded: true,
     };
   }

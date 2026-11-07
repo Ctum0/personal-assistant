@@ -468,12 +468,14 @@ export default function SofiaStageHome() {
 
       const data = await res.json();
       let turnSay = '';
+      let turnText = '';
       let turnMood = 'neutral';
       let turnPanes: Pane[] = [];
 
       if (data && typeof data === 'object') {
         if (data.say) {
           turnSay = data.say;
+          turnText = data.text || '';
           turnMood = data.mood || 'neutral';
           if (Array.isArray(data.panes)) turnPanes = data.panes;
         } else if (data.reply || data.response || data.content) {
@@ -482,6 +484,7 @@ export default function SofiaStageHome() {
             const parsed = JSON.parse(raw);
             if (parsed.say) {
               turnSay = parsed.say;
+              turnText = parsed.text || '';
               turnMood = parsed.mood || 'neutral';
               if (Array.isArray(parsed.panes)) turnPanes = parsed.panes;
             } else {
@@ -495,6 +498,16 @@ export default function SofiaStageHome() {
       }
 
       if (!turnSay) turnSay = "I've processed your update.";
+
+      // If full text contains extra information beyond spoken caption, project detailed pane
+      if (turnText && turnText.length > turnSay.length + 40 && !turnPanes.some((p) => p.kind === 'text' || p.kind === 'code')) {
+        turnPanes.push({
+          id: `pane-notes-${Date.now()}`,
+          title: 'Notes & Details',
+          kind: 'text',
+          text: turnText,
+        });
+      }
 
       const newExpression = getExpressionFromMood(turnMood);
       setExpression(newExpression);
@@ -517,6 +530,9 @@ export default function SofiaStageHome() {
           onStart: () => setIsSpeaking(true),
           onEnd: () => setIsSpeaking(false),
           onError: () => setIsSpeaking(false),
+          onTTFA: (ttfa) => {
+            setDebugMetrics((prev) => ({ ...prev, ttfa }));
+          },
         });
       }
     } catch (err: any) {

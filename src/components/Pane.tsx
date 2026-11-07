@@ -13,6 +13,7 @@ import {
   CodePane,
   ApprovalPane,
   BrowserPane,
+  TextPane,
 } from '@/lib/stage';
 import { BrowserWorkspace } from './BrowserWorkspace';
 import {
@@ -91,6 +92,7 @@ export const Pane: React.FC<PaneProps> = ({ pane, onDismiss, onPin }) => {
         {pane.kind === 'todo' && <TodoPaneContent pane={pane} />}
         {pane.kind === 'code' && <CodePaneContent pane={pane} />}
         {pane.kind === 'approval' && <ApprovalPaneContent pane={pane} onDismiss={onDismiss} />}
+        {pane.kind === 'text' && <TextPaneContent pane={pane} />}
       </div>
     </div>
   );
@@ -653,6 +655,19 @@ const ApprovalPaneContent: React.FC<{ pane: ApprovalPane; onDismiss: (id: string
           </button>
         </div>
       )}
+    </div>
+  );
+};
+
+/* -------------------------------------------------------------
+ * Text / Markdown Pane (Structured Response Details)
+ * ------------------------------------------------------------- */
+const TextPaneContent: React.FC<{ pane: TextPane }> = ({ pane }) => {
+  return (
+    <div className="space-y-3 py-1 font-sans text-rose-100/90 leading-relaxed select-text">
+      <div className="whitespace-pre-wrap text-sm break-words">
+        {pane.text}
+      </div>
     </div>
   );
 };

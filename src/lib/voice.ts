@@ -4,6 +4,8 @@ let currentAudio: HTMLAudioElement | null = null;
 let currentUtterance: SpeechSynthesisUtterance | null = null;
 let audioContext: AudioContext | null = null;
 let isAudioUnlocked = false;
+let activeAbortController: AbortController | null = null;
+let playbackGeneration = 0;
 
 export interface SpeakOptions {
   provider?: string;
@@ -12,6 +14,7 @@ export interface SpeakOptions {
   onStart?: () => void;
   onEnd?: () => void;
   onError?: (err: unknown) => void;
+  onTTFA?: (ttfaMs: number) => void;
 }
 
 /**
@@ -75,6 +78,11 @@ export function unlockAudio() {
  * Barge-in / interruption: Instantly halt any active audio or browser speech playback.
  */
 export function stopSpeaking() {
+  playbackGeneration++;
+  if (activeAbortController) {
+    activeAbortController.abort();
+    activeAbortController = null;
+  }
   if (currentAudio) {
     try {
       currentAudio.pause();
@@ -104,9 +112,73 @@ export function isSpeakingNow(): boolean {
 }
 
 /**
- * Robust Speech Synthesis:
- * Calls /api/tts with authentication headers.
- * Falls back cleanly to browser speech synthesis on server failure.
+ * Splits text into natural sentence chunks for rapid streaming delivery.
+ */
+function splitIntoSentences(text: string): string[] {
+  const rawSentences = text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  if (rawSentences.length <= 1) return rawSentences;
+
+  const merged: string[] = [];
+  let buffer = '';
+
+  for (const s of rawSentences) {
+    if (buffer.length === 0) {
+      buffer = s;
+    } else if (buffer.length + s.length < 80) {
+      buffer += ' ' + s;
+    } else {
+      merged.push(buffer);
+      buffer = s;
+    }
+  }
+  if (buffer.length > 0) {
+    merged.push(buffer);
+  }
+  return merged;
+}
+
+/**
+ * Synthesizes a single chunk via /api/tts.
+ */
+async function fetchTtsAudio(
+  sentence: string,
+  options: SpeakOptions,
+  signal: AbortSignal
+): Promise<string | null> {
+  const authHeaders = getClientAuthHeaders(options.token);
+  const res = await fetch('/api/tts', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders,
+    },
+    credentials: 'same-origin',
+    body: JSON.stringify({
+      text: sentence,
+      provider: options.provider,
+      voiceId: options.voiceId,
+    }),
+    signal,
+  });
+
+  const contentType = res.headers.get('content-type') || '';
+  if (res.ok && contentType.includes('audio/mpeg')) {
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  }
+  return null;
+}
+
+/**
+ * Sentence-Buffered Speech Synthesis:
+ * 1. Splits speech into conversational sentences.
+ * 2. Fetches Sentence 1 immediately to minimize TTFA (~400-800ms).
+ * 3. Prefetches remaining sentences while playing.
+ * 4. Gracefully falls back to Web Speech API on failure.
  */
 export async function speakSofia(
   text: string,
@@ -125,75 +197,97 @@ export async function speakSofia(
   unlockAudio();
   stopSpeaking();
 
+  const currentGen = playbackGeneration;
+  const abortController = new AbortController();
+  activeAbortController = abortController;
+
+  const sentences = splitIntoSentences(cleanText);
+  if (sentences.length === 0) {
+    options.onEnd?.();
+    return;
+  }
+
+  const startTime = Date.now();
+  let firstAudioTriggered = false;
+
   try {
-    const authHeaders = getClientAuthHeaders(options.token);
-    const res = await fetch('/api/tts', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...authHeaders,
-      },
-      credentials: 'same-origin',
-      body: JSON.stringify({
-        text: cleanText,
-        provider: options.provider,
-        voiceId: options.voiceId,
-      }),
-    });
+    // Pipeline: queue of audio promises
+    const audioPromises: Promise<string | null>[] = sentences.map((sentence) =>
+      fetchTtsAudio(sentence, options, abortController.signal).catch(() => null)
+    );
 
-    const contentType = res.headers.get('content-type') || '';
+    // Play each sentence sequentially
+    for (let i = 0; i < audioPromises.length; i++) {
+      if (playbackGeneration !== currentGen) return;
 
-    if (res.ok && contentType.includes('audio/mpeg')) {
-      const blob = await res.blob();
-      const audioUrl = URL.createObjectURL(blob);
-      const audio = new Audio();
-      audio.src = audioUrl;
-      currentAudio = audio;
-
-      let started = false;
-      const cleanup = () => {
-        if (currentAudio === audio) {
-          currentAudio = null;
-        }
-        URL.revokeObjectURL(audioUrl);
-      };
-
-      audio.onplay = () => {
-        started = true;
-        options.onStart?.();
-      };
-
-      audio.onended = () => {
-        cleanup();
-        options.onEnd?.();
-      };
-
-      audio.onerror = (e) => {
-        cleanup();
-        console.warn('Audio element playback error, falling back to Web Speech:', e);
-        fallbackBrowserSpeech(cleanText, options);
-      };
-
-      try {
-        await audio.play();
-        return;
-      } catch (playErr: any) {
-        if (playErr.name === 'AbortError') {
-          // Playback intentionally stopped or superseded
-          cleanup();
-          return;
-        }
-        console.warn('audio.play() error:', playErr);
-        cleanup();
-        fallbackBrowserSpeech(cleanText, options);
+      const audioUrl = await audioPromises[i];
+      if (playbackGeneration !== currentGen) {
+        if (audioUrl) URL.revokeObjectURL(audioUrl);
         return;
       }
+
+      if (!audioUrl) {
+        // If TTS API failed on the first sentence, fall back to browser Web Speech
+        if (i === 0) {
+          fallbackBrowserSpeech(cleanText, options);
+          return;
+        }
+        continue;
+      }
+
+      await new Promise<void>((resolve) => {
+        if (playbackGeneration !== currentGen) {
+          URL.revokeObjectURL(audioUrl);
+          resolve();
+          return;
+        }
+
+        const audio = new Audio();
+        audio.src = audioUrl;
+        currentAudio = audio;
+
+        audio.onplay = () => {
+          if (!firstAudioTriggered) {
+            firstAudioTriggered = true;
+            const ttfa = Date.now() - startTime;
+            options.onTTFA?.(ttfa);
+            options.onStart?.();
+          }
+        };
+
+        const finish = () => {
+          if (currentAudio === audio) {
+            currentAudio = null;
+          }
+          URL.revokeObjectURL(audioUrl);
+          resolve();
+        };
+
+        audio.onended = finish;
+        audio.onerror = () => {
+          finish();
+        };
+
+        audio.play().catch((playErr: any) => {
+          if (playErr.name !== 'AbortError') {
+            console.warn('Playback error for sentence chunk:', playErr);
+          }
+          finish();
+        });
+      });
     }
 
-    fallbackBrowserSpeech(cleanText, options);
-  } catch (err) {
+    if (playbackGeneration === currentGen) {
+      options.onEnd?.();
+    }
+  } catch (err: any) {
+    if (err.name === 'AbortError') return;
     console.warn('/api/tts fetch failed, using browser fallback:', err);
     fallbackBrowserSpeech(cleanText, options);
+  } finally {
+    if (activeAbortController === abortController) {
+      activeAbortController = null;
+    }
   }
 }
 

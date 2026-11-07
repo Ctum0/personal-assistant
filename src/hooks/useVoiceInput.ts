@@ -44,17 +44,17 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
   const stateRef = useRef<VoiceInputState>('idle');
   const listeningRef = useRef(false);
   const transcriptRef = useRef('');
-  const interimTranscriptRef = useRef('');
   const lastCommittedTextRef = useRef('');
   const lastCommittedTimeRef = useRef(0);
-  const recognitionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastSpokenTimeRef = useRef<number>(0);
   const hasSpokenRef = useRef(false);
+  const isStoppingRef = useRef(false);
 
   const updateState = useCallback(
     (newState: VoiceInputState) => {
@@ -89,10 +89,6 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
-    }
     if (streamRef.current) {
       try {
         streamRef.current.getTracks().forEach((t) => t.stop());
@@ -109,147 +105,102 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
     setSilenceCountdown(0);
   }, []);
 
+  const sendAudioForTranscription = useCallback(
+    async (chunks: Blob[], mimeType: string) => {
+      if (chunks.length === 0) {
+        updateState('idle');
+        return;
+      }
+
+      updateState('transcribing');
+      setInterimTranscript('Transcribing audio...');
+
+      try {
+        const audioBlob = new Blob(chunks, { type: mimeType || 'audio/webm' });
+        const formData = new FormData();
+        formData.append('audio_file', audioBlob, 'speech.webm');
+
+        const res = await fetch('/api/stt', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        const recognizedText = typeof data.text === 'string' ? data.text.trim() : '';
+
+        if (recognizedText) {
+          setTranscript(recognizedText);
+          setInterimTranscript('');
+          commitTranscript(recognizedText);
+        } else {
+          setInterimTranscript('');
+          updateState('idle');
+        }
+      } catch (err: any) {
+        console.warn('STT transcription error:', err);
+        setError('Voice transcription failed. You can also type your message.');
+        setInterimTranscript('');
+        updateState('idle');
+      }
+    },
+    [commitTranscript, updateState]
+  );
+
   const stopListening = useCallback(() => {
+    if (isStoppingRef.current) return;
+    isStoppingRef.current = true;
     listeningRef.current = false;
+
     cleanupAudio();
 
-    if (recognitionRef.current) {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       try {
-        recognitionRef.current.abort();
-      } catch {}
-      recognitionRef.current = null;
-    }
-
-    // Flush any pending transcript if user spoke
-    const pending = (transcriptRef.current + ' ' + interimTranscriptRef.current).trim();
-    if (pending && hasSpokenRef.current) {
-      commitTranscript(pending);
+        mediaRecorderRef.current.stop();
+      } catch (err) {
+        console.warn('Failed to stop MediaRecorder:', err);
+      }
     } else {
       updateState('idle');
     }
 
-    transcriptRef.current = '';
-    interimTranscriptRef.current = '';
-    setTranscript('');
-    setInterimTranscript('');
-    hasSpokenRef.current = false;
-  }, [cleanupAudio, commitTranscript, updateState]);
-
-  const initRecognition = useCallback(() => {
-    if (typeof window === 'undefined') return null;
-
-    const SpeechRec =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRec) {
-      setError('Speech recognition not supported in this browser');
-      updateState('error');
-      return null;
-    }
-
-    const recognition = new SpeechRec();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-
-    recognition.onresult = (event: any) => {
-      let finalStr = '';
-      let interimStr = '';
-
-      for (let i = 0; i < event.results.length; i++) {
-        const item = event.results[i];
-        if (item.isFinal) {
-          finalStr += item[0].transcript + ' ';
-        } else {
-          interimStr += item[0].transcript;
-        }
-      }
-
-      if (finalStr) {
-        transcriptRef.current = (transcriptRef.current + ' ' + finalStr).replace(/\s+/g, ' ').trim();
-        setTranscript(transcriptRef.current);
-        hasSpokenRef.current = true;
-        lastSpokenTimeRef.current = Date.now();
-        updateState('transcribing');
-      }
-
-      if (interimStr) {
-        interimTranscriptRef.current = interimStr;
-        setInterimTranscript(interimStr);
-        hasSpokenRef.current = true;
-        lastSpokenTimeRef.current = Date.now();
-        updateState('transcribing');
-      } else {
-        interimTranscriptRef.current = '';
-        setInterimTranscript('');
-        if (listeningRef.current) {
-          updateState('listening');
-        }
-      }
-    };
-
-    recognition.onerror = (e: any) => {
-      if (e.error === 'no-speech' || e.error === 'aborted') {
-        // Silently ignore normal speech pauses and deliberate aborts
-        return;
-      }
-      if (e.error === 'not-allowed') {
-        setError('Microphone permission denied');
-        updateState('error');
-        stopListening();
-        return;
-      }
-      if (e.error === 'network') {
-        // Speech service offline / network error: abort loop cleanly
-        setError('Speech recognition service offline or unreachable in this browser');
-        updateState('error');
-        stopListening();
-        return;
-      }
-      console.warn('SpeechRecognition error:', e.error);
-      setError(`Speech recognition: ${e.error}`);
-      updateState('error');
-      stopListening();
-    };
-
-    recognition.onend = () => {
-      // Auto-restart only if listening and no error occurred
-      if (listeningRef.current && stateRef.current !== 'error') {
-        setTimeout(() => {
-          if (listeningRef.current && stateRef.current !== 'error') {
-            try {
-              recognition.start();
-            } catch (err) {
-              console.debug('Recognition restart notice:', err);
-            }
-          }
-        }, 200);
-      }
-    };
-
-    return recognition;
-  }, [stopListening, updateState]);
+    setTimeout(() => {
+      isStoppingRef.current = false;
+    }, 300);
+  }, [cleanupAudio, updateState]);
 
   const startListening = useCallback(async () => {
     setError(null);
     stopListening();
     updateState('requesting');
+    audioChunksRef.current = [];
+    hasSpokenRef.current = false;
+    lastSpokenTimeRef.current = Date.now();
+    setTranscript('');
+    setInterimTranscript('Listening...');
 
     try {
-      // Preflight microphone access
       if (!navigator.mediaDevices?.getUserMedia) {
-        setError('Audio recording not supported in this browser');
+        setError('Audio recording is not supported in this browser');
         updateState('error');
         return;
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       streamRef.current = stream;
 
-      // Audio analysis for volume / silence detection
-      const AudioCtx =
-        window.AudioContext ||
-        (window as any).webkitAudioContext;
+      // Audio analysis for RMS volume and silence detection
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
         const audioCtx = new AudioCtx();
         audioCtxRef.current = audioCtx;
@@ -260,23 +211,46 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
         analyserRef.current = analyser;
       }
 
-      const recognition = initRecognition();
-      if (!recognition) {
-        cleanupAudio();
-        return;
+      // Determine best supported MIME type
+      let selectedMimeType = 'audio/webm';
+      if (typeof MediaRecorder !== 'undefined') {
+        const mimeTypes = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/ogg;codecs=opus',
+          'audio/mp4',
+        ];
+        for (const mt of mimeTypes) {
+          if (MediaRecorder.isTypeSupported(mt)) {
+            selectedMimeType = mt;
+            break;
+          }
+        }
       }
 
-      recognitionRef.current = recognition;
+      const recorder = new MediaRecorder(stream, { mimeType: selectedMimeType });
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const chunks = [...audioChunksRef.current];
+        audioChunksRef.current = [];
+        if (hasSpokenRef.current && chunks.length > 0) {
+          sendAudioForTranscription(chunks, selectedMimeType);
+        } else {
+          setInterimTranscript('');
+          updateState('idle');
+        }
+      };
+
+      recorder.start(250); // Collect in 250ms slices
       listeningRef.current = true;
       updateState('listening');
-      transcriptRef.current = '';
-      interimTranscriptRef.current = '';
-      setTranscript('');
-      setInterimTranscript('');
-      hasSpokenRef.current = false;
-      lastSpokenTimeRef.current = Date.now();
-
-      recognition.start();
 
       // RMS volume analysis loop
       if (analyserRef.current) {
@@ -291,31 +265,23 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
             sumSquares += norm * norm;
           }
           const rms = Math.sqrt(sumSquares / buffer.length);
-
           const now = Date.now();
           const SPEECH_THRESHOLD = 0.02;
 
           if (rms > SPEECH_THRESHOLD) {
             lastSpokenTimeRef.current = now;
             hasSpokenRef.current = true;
+            setInterimTranscript('Recording speech...');
             setSilenceCountdown(0);
-          } else if (hasSpokenRef.current && (transcriptRef.current || interimTranscriptRef.current)) {
+          } else if (hasSpokenRef.current) {
             const elapsedSilence = now - lastSpokenTimeRef.current;
             const ratio = Math.min(1, elapsedSilence / silenceTimeoutMs);
             setSilenceCountdown(ratio);
 
             if (elapsedSilence >= silenceTimeoutMs) {
-              // Silence period exceeded: commit final speech
-              const committed = (transcriptRef.current + ' ' + interimTranscriptRef.current).trim();
-              if (committed) {
-                commitTranscript(committed);
-              }
-              transcriptRef.current = '';
-              interimTranscriptRef.current = '';
-              setTranscript('');
-              setInterimTranscript('');
-              hasSpokenRef.current = false;
-              setSilenceCountdown(0);
+              // Silence threshold exceeded: stop recording and transcribe
+              stopListening();
+              return;
             }
           }
 
@@ -334,7 +300,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
       updateState('error');
       stopListening();
     }
-  }, [stopListening, initRecognition, silenceTimeoutMs, commitTranscript, cleanupAudio, updateState]);
+  }, [cleanupAudio, sendAudioForTranscription, silenceTimeoutMs, stopListening, updateState]);
 
   const toggleListening = useCallback(async () => {
     if (listeningRef.current) {
@@ -363,9 +329,9 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
     return () => {
       listeningRef.current = false;
       cleanupAudio();
-      if (recognitionRef.current) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         try {
-          recognitionRef.current.abort();
+          mediaRecorderRef.current.stop();
         } catch {}
       }
     };
