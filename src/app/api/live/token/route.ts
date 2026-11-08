@@ -66,6 +66,7 @@ export async function POST(req: NextRequest) {
       systemPrompt: cfg.systemPrompt,
       functionDeclarations: cfg.functionDeclarations,
       realtimeInputConfig: cfg.realtimeInputConfig,
+      contextWindowCompression: cfg.contextWindowCompression,
     });
   } catch (err: any) {
     console.error('Token route error:', err);

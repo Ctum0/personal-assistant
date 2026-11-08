@@ -159,6 +159,21 @@ export function initHermesTables(db: DatabaseSync): void {
       outcome_ref TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS hermes_live_delegations (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      live_session_id TEXT NOT NULL,
+      function_call_id TEXT NOT NULL,
+      hermes_run_id TEXT,
+      delegation_id TEXT,
+      tool_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'started',
+      output TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS execution_audit_log (
       id TEXT PRIMARY KEY,
       seq INTEGER NOT NULL UNIQUE,
@@ -180,8 +195,9 @@ export function initHermesTables(db: DatabaseSync): void {
 
     CREATE INDEX IF NOT EXISTS idx_hermes_approvals_run ON hermes_approvals(run_id);
     CREATE INDEX IF NOT EXISTS idx_hermes_approvals_hermes_run ON hermes_approvals(hermes_run_id);
-    CREATE INDEX IF NOT EXISTS idx_hermes_approvals_status ON hermes_approvals(status);
-    CREATE INDEX IF NOT EXISTS idx_hermes_approvals_hash ON hermes_approvals(action_hash);
+    CREATE INDEX IF NOT EXISTS idx_live_delegations_conv ON hermes_live_delegations(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_live_delegations_run ON hermes_live_delegations(hermes_run_id);
+    CREATE INDEX IF NOT EXISTS idx_live_delegations_fn ON hermes_live_delegations(function_call_id);
     CREATE INDEX IF NOT EXISTS idx_audit_log_seq ON execution_audit_log(seq);
     CREATE INDEX IF NOT EXISTS idx_audit_log_run ON execution_audit_log(run_id);
     CREATE INDEX IF NOT EXISTS idx_audit_log_event ON execution_audit_log(event_type);
@@ -1122,4 +1138,110 @@ export function listApprovalHistory(
     approver_id: r.approver_id,
     outcome_ref: r.outcome_ref,
   }));
+}
+
+export interface StoredLiveDelegationRecord {
+  id: string;
+  conversation_id: string;
+  live_session_id: string;
+  function_call_id: string;
+  hermes_run_id?: string;
+  delegation_id?: string;
+  tool_name: string;
+  status: string;
+  output?: string;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function recordLiveDelegation(
+  db: DatabaseSync,
+  data: {
+    id?: string;
+    conversationId: string;
+    liveSessionId: string;
+    functionCallId: string;
+    hermesRunId?: string;
+    delegationId?: string;
+    toolName: string;
+    status?: string;
+    output?: string;
+    error?: string;
+  }
+): StoredLiveDelegationRecord {
+  const id = data.id || `ldel_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO hermes_live_delegations (
+      id, conversation_id, live_session_id, function_call_id, hermes_run_id, delegation_id, tool_name, status, output, error, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    data.conversationId,
+    data.liveSessionId,
+    data.functionCallId,
+    data.hermesRunId || null,
+    data.delegationId || null,
+    data.toolName,
+    data.status || 'started',
+    data.output || null,
+    data.error || null,
+    now,
+    now
+  );
+  return {
+    id,
+    conversation_id: data.conversationId,
+    live_session_id: data.liveSessionId,
+    function_call_id: data.functionCallId,
+    hermes_run_id: data.hermesRunId,
+    delegation_id: data.delegationId,
+    tool_name: data.toolName,
+    status: data.status || 'started',
+    output: data.output,
+    error: data.error,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+export function updateLiveDelegation(
+  db: DatabaseSync,
+  functionCallId: string,
+  updates: { hermesRunId?: string; status?: string; output?: string; error?: string }
+): void {
+  const sets: string[] = ['updated_at = ?'];
+  const params: any[] = [new Date().toISOString()];
+
+  if (updates.hermesRunId !== undefined) {
+    sets.push('hermes_run_id = ?');
+    params.push(updates.hermesRunId);
+  }
+  if (updates.status !== undefined) {
+    sets.push('status = ?');
+    params.push(updates.status);
+  }
+  if (updates.output !== undefined) {
+    sets.push('output = ?');
+    params.push(updates.output);
+  }
+  if (updates.error !== undefined) {
+    sets.push('error = ?');
+    params.push(updates.error);
+  }
+
+  params.push(functionCallId);
+  db.prepare(`UPDATE hermes_live_delegations SET ${sets.join(', ')} WHERE function_call_id = ?`).run(...params);
+}
+
+export function getLiveDelegationByRunId(
+  db: DatabaseSync,
+  hermesRunId: string
+): StoredLiveDelegationRecord | undefined {
+  const row = db
+    .prepare('SELECT * FROM hermes_live_delegations WHERE hermes_run_id = ? ORDER BY created_at DESC LIMIT 1')
+    .get(hermesRunId) as any;
+  if (!row) return undefined;
+  return row as StoredLiveDelegationRecord;
 }

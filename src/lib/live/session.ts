@@ -83,6 +83,7 @@ export class SofiaLiveSession {
   private userCaption = '';
   private modelCaption = '';
   private lastRunId: string | null = null;
+  private pendingContextUpdates: string[] = [];
 
   // Connection & telemetry
   private resumptionHandle: string | null = null;
@@ -280,8 +281,11 @@ export class SofiaLiveSession {
           systemInstruction: {
             parts: [{ text: configData.systemPrompt || 'You are Sofia.' }],
           },
-          contextWindowCompression: {
-            slidingWindow: {},
+          contextWindowCompression: configData.contextWindowCompression || {
+            slidingWindow: {
+              targetTokens: 8192,
+              triggerTokens: 16384,
+            },
           },
           tools: configData.functionDeclarations
             ? [{ functionDeclarations: configData.functionDeclarations }]
@@ -439,6 +443,7 @@ export class SofiaLiveSession {
             args: fc.args,
             conversationId: this.conversationId,
             sessionId: this.sessionId,
+            functionCallId: fc.id,
           }),
         });
 
@@ -557,6 +562,13 @@ export class SofiaLiveSession {
             // Hybrid VAD signal to prompt immediate model response
             if (this.ws && this.ws.readyState === WebSocket.OPEN) {
               this.ws.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+            }
+
+            if (this.pendingContextUpdates.length > 0) {
+              const pending = this.pendingContextUpdates.shift();
+              if (pending) {
+                this.injectContextUpdate(pending, { scheduling: 'IMMEDIATE' });
+              }
             }
           }
         }
@@ -736,9 +748,18 @@ export class SofiaLiveSession {
   }
 
   /**
-   * Injects background task completion context or system notification into Gemini Live
+   * Injects background task completion context or system notification into Gemini Live.
+   * Defaults to WHEN_IDLE to avoid interrupting user speech mid-sentence.
    */
-  public injectContextUpdate(text: string) {
+  public injectContextUpdate(
+    text: string,
+    options: { scheduling?: 'WHEN_IDLE' | 'SILENT' | 'IMMEDIATE' } = { scheduling: 'WHEN_IDLE' }
+  ) {
+    if (options.scheduling === 'WHEN_IDLE' && this.isUserSpeaking) {
+      this.pendingContextUpdates.push(text);
+      return;
+    }
+
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(
         JSON.stringify({

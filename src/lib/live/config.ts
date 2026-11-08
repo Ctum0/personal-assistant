@@ -17,6 +17,12 @@ export interface LiveConfig {
       endOfSpeechSensitivity: string;
     };
   };
+  contextWindowCompression?: {
+    slidingWindow: {
+      targetTokens: number;
+      triggerTokens: number;
+    };
+  };
 }
 
 export function getLiveConfig(
@@ -40,6 +46,12 @@ export function getLiveConfig(
         silenceDurationMs: Number(process.env.SOFIA_VAD_SILENCE_MS ?? 500),
         startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
         endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
+      },
+    },
+    contextWindowCompression: {
+      slidingWindow: {
+        targetTokens: Number(process.env.SOFIA_COMPRESSION_TARGET_TOKENS ?? 8192),
+        triggerTokens: Number(process.env.SOFIA_COMPRESSION_TRIGGER_TOKENS ?? 16384),
       },
     },
   };
