@@ -626,6 +626,14 @@ export class SofiaLiveSession {
 
         // VAD runs on the RMS computed in the audio thread — no decode here.
         this.analyzeLocalMicChunk(rms);
+
+        // Diagnostic counter: if this stays at 0 while the session says
+        // "Listening", the capture graph is not being pulled. Readable from the
+        // console as window.__sofiaMicFrames.
+        if (typeof window !== 'undefined') {
+          const w = window as unknown as { __sofiaMicFrames?: number };
+          w.__sofiaMicFrames = (w.__sofiaMicFrames || 0) + 1;
+        }
       };
 
       source.connect(worklet);
@@ -642,6 +650,17 @@ export class SofiaLiveSession {
       this.captureSink = sink;
 
       this.setState('listening');
+
+      setTimeout(() => {
+        const frames = (window as unknown as { __sofiaMicFrames?: number }).__sofiaMicFrames || 0;
+        if (frames === 0) {
+          console.warn(
+            '[sofia] capture worklet produced 0 frames in 2s — microphone graph is not running'
+          );
+        } else {
+          console.info(`[sofia] capture worklet running (${frames} frames)`);
+        }
+      }, 2000);
     } catch (err) {
       console.warn('Failed to start audio worklet mic capture:', err);
     }
