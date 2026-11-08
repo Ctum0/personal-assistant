@@ -20,10 +20,8 @@ export interface LiveConfig {
   inputAudioTranscription?: Record<string, never>;
   outputAudioTranscription?: Record<string, never>;
   contextWindowCompression?: {
-    slidingWindow: {
-      targetTokens: number;
-      triggerTokens: number;
-    };
+    slidingWindow: { targetTokens: number };
+    triggerTokens: number;
   };
 }
 
@@ -54,11 +52,14 @@ export function getLiveConfig(
     // both is what makes "You: ..." and her spoken text exist in the UI at all.
     inputAudioTranscription: {},
     outputAudioTranscription: {},
+    // triggerTokens is a SIBLING of slidingWindow. Nesting it inside makes the
+    // Live API reject the entire setup with 1007 "Unknown name triggerTokens",
+    // which closed every connection the moment it opened.
     contextWindowCompression: {
       slidingWindow: {
         targetTokens: Number(process.env.SOFIA_COMPRESSION_TARGET_TOKENS ?? 8192),
-        triggerTokens: Number(process.env.SOFIA_COMPRESSION_TRIGGER_TOKENS ?? 16384),
       },
+      triggerTokens: Number(process.env.SOFIA_COMPRESSION_TRIGGER_TOKENS ?? 16384),
     },
   };
 }

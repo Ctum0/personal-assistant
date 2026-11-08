@@ -513,6 +513,10 @@ export default function SofiaStageHome() {
     await startLiveSession();
   }, [startLiveSession, stopLiveSession]);
 
+  // The dock button reflects the LIVE session (the only voice lane now), not the
+  // legacy Whisper hook, or it sits on "Talk" while she is actually connected.
+  const liveActive = liveState !== 'off' && liveState !== 'error';
+
   const handleSendMessage = async (textToSend?: string, channel: 'chat' | 'voice' = 'chat') => {
     const text = (textToSend || inputText).trim();
     if (!text || isSending) return;
@@ -1120,34 +1124,29 @@ export default function SofiaStageHome() {
           {/* Single-Brain Hermes Voice Talk / Stop Button */}
           <button
             onClick={toggleVoiceMode}
-            aria-label={isVoiceListening ? 'Stop listening' : 'Start voice conversation'}
+            aria-label={liveActive ? 'Stop voice conversation' : 'Start voice conversation'}
             title={
-              isVoiceListening
-                ? 'Stop listening (dispatches transcript to Hermes)'
-                : 'Talk to Sofia (Hermes Authoritative Voice)'
+              liveActive
+                ? 'Hang up the live voice session'
+                : 'Talk to Sofia (live duplex voice)'
             }
             className={`px-4 py-3 rounded-xl transition-all flex items-center justify-center space-x-2 shrink-0 min-w-[105px] min-h-[44px] ${
-              isVoiceListening
+              liveActive
                 ? 'bg-gradient-to-r from-red-800 to-rose-900 hover:from-red-700 hover:to-rose-800 text-white shadow-[0_0_20px_rgba(225,29,72,0.6)] animate-pulse'
                 : 'bg-gradient-to-r from-rose-600 to-crimson-600 hover:from-rose-500 hover:to-crimson-500 text-white shadow-[0_0_15px_rgba(225,29,72,0.4)]'
             }`}
           >
-            {isSpeaking ? (
+            {liveState === 'speaking' ? (
               <>
                 <Volume2 className="w-4 h-4 text-rose-200 animate-pulse" />
                 <span className="text-xs font-bold font-mono tracking-wider">Speaking</span>
               </>
-            ) : voiceState === 'requesting' ? (
+            ) : liveState === 'connecting' ? (
               <>
-                <Mic className="w-4 h-4 text-amber-200 animate-pulse" />
-                <span className="text-xs font-bold font-mono tracking-wider">Requesting...</span>
+                <Sparkles className="w-4 h-4 text-amber-200 animate-spin" />
+                <span className="text-xs font-bold font-mono tracking-wider">Connecting…</span>
               </>
-            ) : voiceState === 'transcribing' ? (
-              <>
-                <Sparkles className="w-4 h-4 text-rose-200 animate-spin" />
-                <span className="text-xs font-bold font-mono tracking-wider">Transcribing...</span>
-              </>
-            ) : isVoiceListening ? (
+            ) : liveState === 'listening' ? (
               <>
                 <PhoneOff className="w-4 h-4 text-rose-200" />
                 <span className="text-xs font-bold font-mono tracking-wider">Listening</span>

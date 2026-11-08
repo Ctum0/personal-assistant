@@ -314,10 +314,8 @@ export class SofiaLiveSession {
           inputAudioTranscription: configData.inputAudioTranscription ?? {},
           outputAudioTranscription: configData.outputAudioTranscription ?? {},
           contextWindowCompression: configData.contextWindowCompression || {
-            slidingWindow: {
-              targetTokens: 8192,
-              triggerTokens: 16384,
-            },
+            slidingWindow: { targetTokens: 8192 },
+            triggerTokens: 16384,
           },
           tools: configData.functionDeclarations
             ? [{ functionDeclarations: configData.functionDeclarations }]
