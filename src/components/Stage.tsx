@@ -40,18 +40,18 @@ export const Stage: React.FC<StageProps> = ({
 
   // Compute CSS custom property targets for dynamic Stage layout
   let sofiaScale = 1;
-  let sofiaShift = '0%';
+  let sofiaShift = '0px';
 
   if (hasLargeWorkspace) {
-    // Keep Sofia prominent (0.88x scale) anchored gracefully on the left
+    // Keep Sofia prominent (0.88x scale) anchored gracefully in the left half
     sofiaScale = 0.88;
-    sofiaShift = '-36%';
+    sofiaShift = '-22vw';
   } else if (paneCount === 1) {
-    sofiaScale = 0.90;
-    sofiaShift = '-22%';
+    sofiaScale = 0.92;
+    sofiaShift = '-16vw';
   } else if (paneCount >= 2) {
-    sofiaScale = 0.82;
-    sofiaShift = '-30%';
+    sofiaScale = 0.84;
+    sofiaShift = '-20vw';
   }
 
   return (
