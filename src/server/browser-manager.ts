@@ -23,6 +23,7 @@ interface ActiveBrowserSession {
   page: Page;
   cdp: CDPSession;
   screencastListeners: Set<ScreencastListener>;
+  screencastActive?: boolean;
   latestFrame: ScreencastFrame | null;
   lastActivity: number;
   currentUrl: string;
@@ -45,6 +46,19 @@ export class BrowserManager {
   constructor(options?: BrowserManagerOptions) {
     this.proxyUrl = options?.proxyUrl;
     this.allowLoopbackForTesting = options?.allowLoopbackForTesting || false;
+
+    // Periodically reap idle sessions older than 15 minutes with no active listeners
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+      for (const [id, session] of this.sessions.entries()) {
+        if (session.screencastListeners.size === 0 && now - session.lastActivity > IDLE_TIMEOUT_MS) {
+          console.log(`[BrowserManager] Reaping idle session: ${id}`);
+          this.closeSession(id).catch(() => {});
+        }
+      }
+    }, 60000);
+    if (interval.unref) interval.unref();
   }
 
   public static getInstance(options?: BrowserManagerOptions): BrowserManager {
@@ -84,6 +98,9 @@ export class BrowserManager {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-gpu-compositing',
+        '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-extensions',
@@ -183,15 +200,8 @@ export class BrowserManager {
 
     this.sessions.set(sessionId, sessionObj);
 
-    // 4. Start Screencast frame generation
+    // 4. Enable Page events (screencast starts on-demand when listeners connect)
     await cdp.send('Page.enable').catch(() => {});
-    await cdp.send('Page.startScreencast', {
-      format: 'jpeg',
-      quality: 75,
-      maxWidth: 1280,
-      maxHeight: 800,
-      everyNthFrame: 1,
-    }).catch(() => {});
 
     cdp.on('Page.screencastFrame', async ({ data, metadata, sessionId: frameSessionId }: any) => {
       try {
@@ -548,6 +558,29 @@ export class BrowserManager {
     return true;
   }
 
+  private async startScreencastIfNeeded(session: ActiveBrowserSession): Promise<void> {
+    if (session.screencastActive) return;
+    try {
+      await session.cdp.send('Page.enable').catch(() => {});
+      await session.cdp.send('Page.startScreencast', {
+        format: 'jpeg',
+        quality: 60,
+        maxWidth: 1280,
+        maxHeight: 800,
+        everyNthFrame: 2,
+      }).catch(() => {});
+      session.screencastActive = true;
+    } catch {}
+  }
+
+  private async stopScreencastIfIdle(session: ActiveBrowserSession): Promise<void> {
+    if (!session.screencastActive || session.screencastListeners.size > 0) return;
+    try {
+      await session.cdp.send('Page.stopScreencast').catch(() => {});
+      session.screencastActive = false;
+    } catch {}
+  }
+
   /**
    * Subscribes a listener to receive real-time screencast frames for a session.
    */
@@ -555,8 +588,9 @@ export class BrowserManager {
     let session = this.sessions.get(sessionId);
     if (!session) {
       // Create session lazily on subscription
-      this.ensureSession(sessionId).then((s) => {
+      this.ensureSession(sessionId).then(async (s) => {
         s.screencastListeners.add(listener);
+        await this.startScreencastIfNeeded(s);
         if (s.latestFrame) {
           try {
             listener(s.latestFrame);
@@ -565,11 +599,17 @@ export class BrowserManager {
       });
       return () => {
         const s = this.sessions.get(sessionId);
-        if (s) s.screencastListeners.delete(listener);
+        if (s) {
+          s.screencastListeners.delete(listener);
+          if (s.screencastListeners.size === 0) {
+            this.stopScreencastIfIdle(s).catch(() => {});
+          }
+        }
       };
     }
 
     session.screencastListeners.add(listener);
+    this.startScreencastIfNeeded(session).catch(() => {});
     if (session.latestFrame) {
       try {
         listener(session.latestFrame);
@@ -578,7 +618,12 @@ export class BrowserManager {
 
     return () => {
       const s = this.sessions.get(sessionId);
-      if (s) s.screencastListeners.delete(listener);
+      if (s) {
+        s.screencastListeners.delete(listener);
+        if (s.screencastListeners.size === 0) {
+          this.stopScreencastIfIdle(s).catch(() => {});
+        }
+      }
     };
   }
 
@@ -599,6 +644,9 @@ export class BrowserManager {
 
     this.sessions.delete(sessionId);
     try {
+      if (session.screencastActive) {
+        await session.cdp.send('Page.stopScreencast').catch(() => {});
+      }
       session.screencastListeners.clear();
       await session.context.close();
     } catch {}
