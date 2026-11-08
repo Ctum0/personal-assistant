@@ -157,6 +157,7 @@ export class SofiaLiveSession {
   private connStartTime = 0;
   private metricsTimer: NodeJS.Timeout | null = null;
   private hardCapTimer: NodeJS.Timeout | null = null;
+  private connectTimer: NodeJS.Timeout | null = null;
   private turnTimeoutTimer: NodeJS.Timeout | null = null;
   private idleDrainTimer: NodeJS.Timeout | null = null;
   private goAwayTimer: NodeJS.Timeout | null = null;
@@ -313,6 +314,24 @@ export class SofiaLiveSession {
     const ws = new WebSocket(wsUrl);
     this.ws = ws;
 
+    // A Live socket can open and then say nothing at all: no setupComplete, no
+    // error frame, no close. Before this timer the UI sat on "Connecting…"
+    // indefinitely with no way to know whether anything was happening.
+    if (this.connectTimer) clearTimeout(this.connectTimer);
+    this.connectTimer = setTimeout(() => {
+      if (this.state !== 'connecting' && this.state !== 'reconnecting') return;
+      const elapsed = Date.now() - this.connStartTime;
+      console.warn(`[sofia] live setup timed out after ${elapsed}ms (readyState ${ws.readyState})`);
+      try {
+        this.ws = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.close();
+      } catch {}
+      this.dropCount++;
+      this.attemptReconnect('Live setup timed out — no reply from Gemini');
+    }, 15000);
+
     ws.onopen = () => {
       // Send initial setup message with systemInstruction and tools
       const setupMsg: any = {
@@ -401,6 +420,10 @@ export class SofiaLiveSession {
   private handleServerMessage(msg: any) {
     // 1. Setup complete -> session is live!
     if (msg.setupComplete) {
+      if (this.connectTimer) {
+        clearTimeout(this.connectTimer);
+        this.connectTimer = null;
+      }
       this.setState('live');
       this.startMicStreaming();
       return;
@@ -862,7 +885,9 @@ export class SofiaLiveSession {
     this.mouthAnimFrame = requestAnimationFrame(updateMouth);
   }
 
-  private async attemptReconnect() {
+  private async attemptReconnect(reason?: string) {
+    if (reason) console.warn('[sofia] reconnecting:', reason);
+
     if (this.reconnectCount >= LIMITS.maxResumeAttempts) {
       console.warn('Max resume attempts reached; starting fresh session');
       this.resumptionHandle = null;
@@ -875,12 +900,19 @@ export class SofiaLiveSession {
     setTimeout(async () => {
       try {
         const tokenRes = await fetch('/api/live/token', { method: 'POST', headers: getAuthHeaders() });
-        if (tokenRes.ok) {
-          const cfg = await tokenRes.json();
-          await this.connectSocket(cfg, true);
+        if (!tokenRes.ok) {
+          const body = await tokenRes.json().catch(() => ({}));
+          throw new Error(body.error || `Token mint failed (${tokenRes.status})`);
         }
+        const cfg = await tokenRes.json();
+        await this.connectSocket(cfg, true);
       } catch (err) {
-        console.warn('Reconnect failed:', err);
+        // Never swallow this: a silent failure is what left the UI on
+        // "Connecting…" with nothing to act on.
+        const msg = err instanceof Error ? err.message : 'Reconnect failed';
+        console.warn('Reconnect failed:', msg);
+        this.setState('failed');
+        this.callbacks.onError?.(`Could not reach Gemini Live: ${msg}`);
       }
     }, backoff);
   }

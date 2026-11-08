@@ -26,6 +26,9 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["msedge-tts"],
   env: {
     NEXT_PUBLIC_WORKLET_V: workletVersion(),
+    // Bumped on every build. The client compares this against /api/build-id on
+    // load: an open tab running yesterday's bundle is how fixes "don't arrive".
+    NEXT_PUBLIC_BUILD_ID: Date.now().toString(36),
   },
   cacheComponents: true,
   partialPrefetching: true,

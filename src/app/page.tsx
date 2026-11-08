@@ -181,6 +181,23 @@ export default function SofiaStageHome() {
     }
   }, [voiceError]);
 
+  // A tab left open across a deploy keeps running the old bundle — that is one
+  // of the ways a shipped fix silently "does not arrive". Compare build ids once
+  // on mount and reload ourselves, at most once per build.
+  useEffect(() => {
+    const KEY = "sofia_build_reload";
+    fetch("/api/build-id", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        const mine = process.env.NEXT_PUBLIC_BUILD_ID || "dev";
+        if (!j?.id || j.id === mine) return;
+        if (sessionStorage.getItem(KEY) === j.id) return;
+        sessionStorage.setItem(KEY, j.id);
+        window.location.reload();
+      })
+      .catch(() => {});
+  }, []);
+
   // Reflect interim voice transcription in the user caption
   useEffect(() => {
     if (isVoiceListening && voiceInterim) {
