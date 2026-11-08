@@ -274,6 +274,9 @@ export class SofiaLiveSession {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({ conversationId: this.conversationId }),
+        // A deploy restarts the app; without this the request just hangs and the
+        // button reads "Connecting…" until the user gives up.
+        signal: AbortSignal.timeout(10_000),
       });
       if (!tokenRes.ok) {
         const errJson = await tokenRes.json().catch(() => ({}));
@@ -899,7 +902,11 @@ export class SofiaLiveSession {
 
     setTimeout(async () => {
       try {
-        const tokenRes = await fetch('/api/live/token', { method: 'POST', headers: getAuthHeaders() });
+        const tokenRes = await fetch('/api/live/token', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          signal: AbortSignal.timeout(10_000),
+        });
         if (!tokenRes.ok) {
           const body = await tokenRes.json().catch(() => ({}));
           throw new Error(body.error || `Token mint failed (${tokenRes.status})`);
