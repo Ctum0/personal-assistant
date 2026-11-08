@@ -1,28 +1,32 @@
 /**
- * PCM capture worklet — framing only, deliberately NO resampling.
+ * PCM capture worklet — framing only. NO resampling, NO base64.
  *
- * Capture runs on an AudioContext pinned to 16 kHz (see lib/live/session.ts), so
- * `sampleRate` here is already the rate the Live API wants. The previous version
- * hand-rolled a box-average decimator (sum of `ratio` samples / count): a
- * zero-order-hold filter that lets everything above 8 kHz alias straight back
- * into the speech band, plus timing jitter at 44.1 kHz where the ratio is
- * fractional. The browser's own resampler is spec-defined and far better than
- * anything hand-rolled here, so this processor only converts Float32 -> Int16
- * and frames it.
+ * Two hard constraints drive this file:
  *
- * If a browser ignores the requested context rate, frames are still correct:
- * the session labels them with the rate actually captured (the Live API
- * resamples any input rate).
+ * 1. `btoa`, `atob` and `TextEncoder` DO NOT EXIST inside AudioWorkletGlobalScope
+ *    (verified in Chromium: all three are undefined). The previous version called
+ *    btoa() on the first full frame, which threw inside process(); a worklet that
+ *    throws is torn down silently, so not one frame ever reached the page — the
+ *    microphone was deaf while the UI happily said "Listening".
  *
- * Frame size comes from `processorOptions.frameSamples` (~40 ms at the capture
- * rate) and falls back to 40 ms of the current context.
+ * 2. Capture runs on its own AudioContext pinned to 16 kHz, so the browser's
+ *    spec-defined resampler converts the mic stream instead of a hand-rolled
+ *    box-average decimator (which folded everything above 8 kHz back into the
+ *    speech band).
+ *
+ * The processor therefore posts raw Float32 samples plus an RMS (cheap here) and
+ * the main thread does Int16 + base64 — the same split Google's reference capture
+ * worklet uses.
+ *
+ * Frame size comes from `processorOptions.frameSamples` (~32 ms at the capture
+ * rate, inside the 20-40 ms window the Live API asks for).
  */
 class PCM16K extends AudioWorkletProcessor {
   constructor(options) {
     super();
     const requested = options && options.processorOptions && options.processorOptions.frameSamples;
     this.frameSamples =
-      Number.isFinite(requested) && requested > 0 ? Math.round(requested) : Math.round(sampleRate * 0.04);
+      Number.isFinite(requested) && requested > 0 ? Math.round(requested) : Math.round(sampleRate * 0.032);
     this.buffer = new Float32Array(this.frameSamples);
     this.filled = 0;
   }
@@ -41,32 +45,20 @@ class PCM16K extends AudioWorkletProcessor {
   }
 
   flush() {
-    const n = this.frameSamples;
-    const pcm = new Int16Array(n);
     let sumSq = 0;
-
-    for (let i = 0; i < n; i++) {
-      const v = Math.max(-1, Math.min(1, this.buffer[i]));
+    for (let i = 0; i < this.frameSamples; i++) {
+      const v = this.buffer[i];
       sumSq += v * v;
-      // Asymmetric scaling keeps full-scale negative samples inside Int16.
-      pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
     }
 
-    // RMS is computed on the audio thread so the main thread never has to
-    // base64-decode a frame just to measure loudness.
-    const rms = Math.sqrt(sumSq / n);
-    this.port.postMessage({ b64: this.toBase64(pcm), rms });
+    // slice(): the buffer is reused immediately for the next frame.
+    this.port.postMessage({
+      type: 'audio',
+      data: this.buffer.slice(),
+      rms: Math.sqrt(sumSq / this.frameSamples),
+    });
+
     this.filled = 0;
-  }
-
-  toBase64(int16) {
-    const bytes = new Uint8Array(int16.buffer);
-    let out = '';
-    const CHUNK = 0x8000;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      out += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-    }
-    return btoa(out);
   }
 }
 

@@ -67,7 +67,29 @@ export const LIMITS = {
  * PCM, and a 16 kHz context would downsample every reply.
  */
 const CAPTURE_RATE_HZ = 16_000;
-const CAPTURE_FRAME_MS = 40;
+const CAPTURE_FRAME_MS = 32;
+
+/**
+ * Float32 samples -> Int16 little-endian PCM -> base64.
+ *
+ * This MUST run on the main thread: `btoa` does not exist inside
+ * AudioWorkletGlobalScope, and a worklet that throws in process() is killed
+ * silently — which is exactly how the microphone spent this whole project deaf.
+ */
+function pcm16ToBase64(samples: Float32Array): string {
+  const pcm = new Int16Array(samples.length);
+  for (let i = 0; i < samples.length; i++) {
+    const v = Math.max(-1, Math.min(1, samples[i]));
+    pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+  }
+  const bytes = new Uint8Array(pcm.buffer);
+  let out = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    out += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
+  }
+  return btoa(out);
+}
 
 /**
  * `goAway.timeLeft` is a google.protobuf.Duration. Proto3 JSON maps that to a
@@ -597,12 +619,25 @@ export class SofiaLiveSession {
       this.workletNode = worklet;
 
       worklet.port.onmessage = (e: MessageEvent) => {
-        // A cached pre-fix worklet posts a bare base64 string. Accept both
-        // shapes: without this guard a stale asset means a silently dead
-        // microphone with no error anywhere.
-        const payload = e.data as { b64?: string; rms?: number } | string;
-        const b64 = typeof payload === 'string' ? payload : payload?.b64;
-        const rms = typeof payload === 'string' ? 0 : (payload?.rms ?? 0);
+        // The worklet posts Float32 frames; older cached copies post {b64} or a
+        // bare string. Handle all three so a stale asset degrades loudly rather
+        // than silently swallowing every frame.
+        type WorkletMsg = { type?: string; data?: Float32Array; rms?: number; b64?: string };
+        const payload = e.data as WorkletMsg | string;
+
+        let b64: string | null = null;
+        let rms = 0;
+
+        if (typeof payload === 'string') {
+          b64 = payload;
+        } else if (payload?.b64) {
+          b64 = payload.b64;
+          rms = payload.rms ?? 0;
+        } else if (payload?.data && payload.data.length > 0) {
+          rms = payload.rms ?? 0;
+          b64 = pcm16ToBase64(payload.data);
+        }
+
         if (!b64) {
           console.warn('Unexpected capture worklet payload; ignoring frame');
           return;
@@ -654,8 +689,17 @@ export class SofiaLiveSession {
       setTimeout(() => {
         const frames = (window as unknown as { __sofiaMicFrames?: number }).__sofiaMicFrames || 0;
         if (frames === 0) {
+          const ctx = this.captureCtx as AudioContext | null;
+          const track = this.micStream?.getAudioTracks?.()[0];
           console.warn(
-            '[sofia] capture worklet produced 0 frames in 2s — microphone graph is not running'
+            '[sofia] capture worklet produced 0 frames in 2s — graph not running ' +
+              JSON.stringify({
+                ctxState: ctx?.state ?? 'null',
+                ctxRate: ctx?.sampleRate ?? 0,
+                currentNode: this.workletNode ? 'yes' : 'no',
+                trackState: track?.readyState ?? 'none',
+                trackMuted: track?.muted ?? null,
+              })
           );
         } else {
           console.info(`[sofia] capture worklet running (${frames} frames)`);
