@@ -8,6 +8,21 @@ let activeAbortController: AbortController | null = null;
 let currentPlaybackTurnId = 0;
 let isPlaybackActive = false;
 
+export type AudioOwner = 'LIVE_GEMINI' | 'FALLBACK_TTS' | 'MUTED';
+let currentAudioOwner: AudioOwner = 'FALLBACK_TTS';
+
+export function getAudioOwner(): AudioOwner {
+  return currentAudioOwner;
+}
+
+export function setAudioOwner(owner: AudioOwner): void {
+  if (currentAudioOwner === owner) return;
+  currentAudioOwner = owner;
+  if (owner === 'LIVE_GEMINI' || owner === 'MUTED') {
+    stopSpeaking();
+  }
+}
+
 export interface SpeakOptions {
   provider?: string;
   voiceId?: string;
@@ -193,6 +208,12 @@ export async function speakSofia(
   text: string,
   options: SpeakOptions = {}
 ): Promise<void> {
+  // Hardline Audio Ownership: If Gemini Live is active or audio is muted, never play TTS
+  if (currentAudioOwner !== 'FALLBACK_TTS') {
+    options.onEnd?.();
+    return;
+  }
+
   const cleanText = text
     .replace(/\[MOOD:[^\]]+\]/gi, '')
     .replace(/[`*_#]/g, '')

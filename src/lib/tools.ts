@@ -342,7 +342,7 @@ export const UNIFIED_TOOLS = [
   {
     name: 'ask_hermes',
     description:
-      'Delegate a complex task requiring machine access, terminals, files, workspace operations, or CUA laptop control.',
+      'Delegate a complex task requiring machine access, terminals, files, workspace operations, or CUA laptop control. CRITICAL: ONLY invoke when the user explicitly requests task execution or action. NEVER invoke on ordinary greetings, pleasantries, or casual conversation.',
     geminiParameters: {
       type: 'OBJECT',
       properties: {
@@ -361,7 +361,7 @@ export const UNIFIED_TOOLS = [
   {
     name: 'sofia_delegate_to_hermes',
     description:
-      'Delegate an action, research, long-term memory retrieval, code execution, terminal command, or browser automation task to Hermes. Returns an asynchronous task ID immediately so conversation does not block.',
+      'Delegate an action, research, long-term memory retrieval, code execution, terminal command, or browser automation task to Hermes. CRITICAL: ONLY invoke when user explicitly requests task execution. NEVER invoke on greetings, casual conversation, pleasantries, or small talk.',
     geminiParameters: {
       type: 'OBJECT',
       properties: {
@@ -392,7 +392,7 @@ export const UNIFIED_TOOLS = [
   // Tier 4: Live Browser Workspace (Interactive Shared Stage Browser)
   {
     name: 'browser_open',
-    description: 'Open a real, interactive browser workspace in Sofia Stage for a website, repository, or search query.',
+    description: 'Open a real, interactive browser workspace in Sofia Stage for a website, repository, or search query. CRITICAL: ONLY invoke when user explicitly requests opening a website, visiting a URL, or searching the web. NEVER invoke on greetings, pleasantries, or casual conversation.',
     geminiParameters: {
       type: 'OBJECT',
       properties: {
@@ -412,7 +412,7 @@ export const UNIFIED_TOOLS = [
   },
   {
     name: 'browser_navigate',
-    description: 'Navigate the active browser workspace to a new URL.',
+    description: 'Navigate the active browser workspace to a new URL. CRITICAL: ONLY invoke when user explicitly asks to navigate the active browser.',
     geminiParameters: {
       type: 'OBJECT',
       properties: {

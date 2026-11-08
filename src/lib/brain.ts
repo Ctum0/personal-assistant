@@ -235,6 +235,84 @@ export function parseTurn(raw: string): SofiaTurn {
 export { executeTool as executeSofiaTool };
 export const SOFIA_TOOLS = buildOpenAITools();
 
+export function isPureGreetingOrChitchat(message: string): boolean {
+  if (!message || typeof message !== 'string') return false;
+  const trimmed = message.trim().toLowerCase();
+  const stripped = trimmed.replace(/[!?,.:;~]+$/, '').trim();
+
+  const greetingPhrases = new Set([
+    'hi',
+    'hello',
+    'hey',
+    'hey sofia',
+    'hi sofia',
+    'hello sofia',
+    'yo',
+    'howdy',
+    'greetings',
+    'good morning',
+    'good afternoon',
+    'good evening',
+    'good day',
+    'sup',
+    "what's up",
+    'whats up',
+    'how are you',
+    'how are you doing',
+    "how's it going",
+    'hows it going',
+    'thank you',
+    'thanks',
+    'thx',
+    'thank you sofia',
+    'thanks sofia',
+    'cool',
+    'great',
+    'awesome',
+    'nice',
+    'bye',
+    'goodbye',
+    'see ya',
+    'see you',
+    'what do you think',
+    'what do you think?',
+    'tell me something interesting',
+    'tell me a fun fact',
+    'who are you',
+    'what can you do',
+  ]);
+
+  if (greetingPhrases.has(stripped)) return true;
+
+  if (
+    /^(hi|hello|hey|greetings|good\s+(morning|afternoon|evening|day))\s+(sofia\b|there\b|friend\b)?[!.]*$/i.test(
+      stripped
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^(how\s+are\s+you|how\s+is\s+it\s+going|how\'?s\s+it\s+going)(\s+today)?(\s+sofia)?[?.]*$/i.test(
+      stripped
+    )
+  ) {
+    return true;
+  }
+  if (/^(thank\s+you|thanks|many\s+thanks)(\s+sofia)?[!.]*$/i.test(stripped)) {
+    return true;
+  }
+  return false;
+}
+
+export function isExplicitBrowserRequest(message: string): boolean {
+  if (!message || typeof message !== 'string') return false;
+  const trimmed = message.trim();
+  if (/^(https?:\/\/|www\.)\S+$/i.test(trimmed)) return true;
+  return /\b(open|browse|navigate\s+to|visit|go\s+to|launch|search\s+for)\b.+\b(browser|url|site|website|webpage|page|github|google)\b/i.test(
+    trimmed
+  );
+}
+
 export function isHermesPrimaryEnabled(): boolean {
   if (process.env.SOFIA_HERMES_PRIMARY === 'false' || process.env.SOFIA_HERMES_PRIMARY === '0') {
     return false;
@@ -302,6 +380,7 @@ ${pinnedNotes.map((n, i) => `${i + 1}. ${n.text}`).join('\n')}`;
 
   const collectedPanes: Pane[] = [];
   const executedToolCalls: any[] = [];
+  const isGreeting = isPureGreetingOrChitchat(userMessage);
 
   // 1. Try LiteLLM if API key is provided
   if (apiKey) {
@@ -319,8 +398,8 @@ ${pinnedNotes.map((n, i) => `${i + 1}. ${n.text}`).join('\n')}`;
           body: JSON.stringify({
             model,
             messages,
-            tools: buildOpenAITools(),
-            tool_choice: 'auto',
+            tools: isGreeting ? undefined : buildOpenAITools(),
+            tool_choice: isGreeting ? undefined : 'auto',
             max_tokens: 600,
             temperature: 0.6,
           }),
@@ -413,7 +492,7 @@ ${pinnedNotes.map((n, i) => `${i + 1}. ${n.text}`).join('\n')}`;
             body: JSON.stringify({
               contents: geminiContents,
               systemInstruction: { parts: [{ text: geminiSystemPrompt }] },
-              tools: geminiTools,
+              tools: isGreeting ? undefined : geminiTools,
               generationConfig: {
                 temperature: 0.7,
                 maxOutputTokens: 800,
@@ -654,26 +733,24 @@ async function dispatchToHermesPrimary(
 
     let panes = turn.panes || [];
     if (!panes.some((p) => p.kind === 'browser')) {
-      try {
-        const convId = conversationId || 'conv_main';
-        const activeSession = db
-          .prepare(
-            `SELECT * FROM browser_sessions 
-             WHERE (conversation_id = ? OR conversation_id = 'conv_main' OR conversation_id = 'default')
-               AND status != 'closed'
-             ORDER BY updated_at DESC LIMIT 1`
-          )
-          .get(convId) as any;
+      const isGreeting = isPureGreetingOrChitchat(userMessage);
+      const isExplicitBrowser = isExplicitBrowserRequest(userMessage);
 
-        if (activeSession) {
-          const sessionUpdated = new Date(activeSession.updated_at).getTime();
-          const turnStarted = startTime;
-          const isTurnRecent = sessionUpdated >= turnStarted - 5000;
-          const mentionsBrowsing = /open|browse|navigate|search|website|github|web|inspect|page/i.test(
-            userMessage + ' ' + (turn.text || '')
-          );
+      // Strict intent guard: Never attach browser panes on greetings or incidental words
+      if (!isGreeting && isExplicitBrowser) {
+        try {
+          const convId = conversationId || 'default';
+          const activeSession = db
+            .prepare(
+              `SELECT * FROM browser_sessions 
+               WHERE conversation_id = ?
+                 AND status = 'active'
+                 AND updated_at >= datetime('now', '-15 minutes')
+               ORDER BY updated_at DESC LIMIT 1`
+            )
+            .get(convId) as any;
 
-          if (isTurnRecent || mentionsBrowsing) {
+          if (activeSession) {
             const browserPane: BrowserPane = {
               id: `pane-browser-${activeSession.id}`,
               title: activeSession.title || 'Browser Workspace',
@@ -685,9 +762,9 @@ async function dispatchToHermesPrimary(
             };
             panes = [browserPane, ...panes];
           }
+        } catch (sessErr) {
+          console.warn('Failed to resolve active browser session for panes:', sessErr);
         }
-      } catch (sessErr) {
-        console.warn('Failed to resolve active browser session for panes:', sessErr);
       }
     }
 

@@ -8,7 +8,7 @@ import { LiveDebugOverlay, DebugMetrics } from '@/components/LiveDebugOverlay';
 import { Pane } from '@/lib/stage';
 import { SofiaExpression } from '@/lib/types';
 import { getExpressionFromMood } from '@/lib/expressions';
-import { speakSofia, stopSpeaking, unlockAudio } from '@/lib/voice';
+import { speakSofia, stopSpeaking, unlockAudio, getAudioOwner, setAudioOwner } from '@/lib/voice';
 import { SofiaLiveSession, LiveConnState } from '@/lib/live/session';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import {
@@ -105,12 +105,12 @@ export default function SofiaStageHome() {
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
           if (data?.sessions && Array.isArray(data.sessions)) {
-            const activeSess =
-              data.sessions.find(
-                (s: any) =>
-                  s.status === 'active' &&
-                  (s.conversation_id === stored || s.conversation_id === 'default' || !stored)
-              ) || data.sessions.find((s: any) => s.status === 'active');
+            const activeSess = data.sessions.find(
+              (s: any) =>
+                s.status === 'active' &&
+                s.conversation_id === stored &&
+                Date.now() - new Date(s.updated_at).getTime() < 15 * 60 * 1000
+            );
             if (activeSess) {
               setPanes((prev) => {
                 if (prev.some((p) => p.kind === 'browser')) return prev;
@@ -397,10 +397,11 @@ export default function SofiaStageHome() {
         liveSessionRef.current.stop();
         liveSessionRef.current = null;
       }
+      setAudioOwner(isMuted ? 'MUTED' : 'FALLBACK_TTS');
       stopSpeaking();
       await startVoiceInput();
     }
-  }, [isVoiceListening, startVoiceInput, stopVoiceInput]);
+  }, [isVoiceListening, isMuted, startVoiceInput, stopVoiceInput]);
 
   // Handle Talk / Hang up Toggle
   const toggleLiveVoice = useCallback(async () => {
@@ -410,12 +411,19 @@ export default function SofiaStageHome() {
       // Hang up
       liveSessionRef.current.stop();
       liveSessionRef.current = null;
+      setAudioOwner(isMuted ? 'MUTED' : 'FALLBACK_TTS');
       setLiveState('off');
       setIsSpeaking(false);
       setMouthOpen(0);
       setMicLevel(0);
       return;
     }
+
+    if (isVoiceListening) {
+      stopVoiceInput();
+    }
+    stopSpeaking();
+    setAudioOwner(isMuted ? 'MUTED' : 'LIVE_GEMINI');
 
     // Start Live Session
     setLiveState('connecting');
@@ -575,7 +583,7 @@ export default function SofiaStageHome() {
         });
       }
 
-      if (!isMuted) {
+      if (!isMuted && getAudioOwner() === 'FALLBACK_TTS' && !liveSessionRef.current?.isActive()) {
         setIsSpeaking(true);
         await speakSofia(turnSay, {
           onStart: () => setIsSpeaking(true),
@@ -873,14 +881,20 @@ export default function SofiaStageHome() {
   };
 
   const toggleMute = () => {
-    if (isSpeaking) {
-      if (liveSessionRef.current) {
-        liveSessionRef.current.flushAudio();
+    setIsMuted((prev) => {
+      const next = !prev;
+      if (next) {
+        setAudioOwner('MUTED');
+        stopSpeaking();
+        if (liveSessionRef.current) {
+          liveSessionRef.current.flushAudio();
+        }
+        setIsSpeaking(false);
+      } else {
+        setAudioOwner(liveSessionRef.current?.isActive() ? 'LIVE_GEMINI' : 'FALLBACK_TTS');
       }
-      stopSpeaking();
-      setIsSpeaking(false);
-    }
-    setIsMuted((prev) => !prev);
+      return next;
+    });
   };
 
   const suggestions = [

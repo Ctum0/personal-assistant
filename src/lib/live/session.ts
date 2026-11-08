@@ -1,6 +1,7 @@
 'use client';
 
 import { Pane } from '../stage';
+import { setAudioOwner, stopSpeaking } from '../voice';
 
 export type LiveConnState =
   | 'off'
@@ -114,6 +115,10 @@ export class SofiaLiveSession {
     return this.state;
   }
 
+  public isActive(): boolean {
+    return this.state !== 'off' && this.state !== 'failed' && this.state !== 'closing';
+  }
+
   private setState(newState: LiveConnState) {
     this.state = newState;
     this.callbacks.onStateChange?.(newState);
@@ -143,6 +148,8 @@ export class SofiaLiveSession {
     if (this.state !== 'off' && this.state !== 'failed') return;
 
     this.sessionStartTime = Date.now();
+    setAudioOwner('LIVE_GEMINI');
+    stopSpeaking();
     this.setState('minting');
 
     try {
@@ -798,5 +805,6 @@ export class SofiaLiveSession {
     }
 
     this.setState('off');
+    setAudioOwner('FALLBACK_TTS');
   }
 }
