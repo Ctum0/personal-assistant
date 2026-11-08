@@ -521,6 +521,19 @@ export default function SofiaStageHome() {
     const text = (textToSend || inputText).trim();
     if (!text || isSending) return;
 
+    // While the duplex session is up, a typed message belongs INSIDE it. Running
+    // it through the text lane instead makes TTS answer while Live is also
+    // speaking, which is the "two voices, same sentence" overlap.
+    const liveSession = liveSessionRef.current;
+    if (liveSession && liveSession.isActive()) {
+      setInputText('');
+      setShowSuggestions(false);
+      setUserCaption(text);
+      unlockAudio();
+      liveSession.sendTextMessage(text);
+      return;
+    }
+
     setInputText('');
     setShowSuggestions(false);
     setUserCaption(text);
