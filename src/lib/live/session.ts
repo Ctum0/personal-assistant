@@ -51,15 +51,53 @@ function getAuthHeaders(): Record<string, string> {
 export const LIMITS = {
   hardCapMs: 40 * 60_000,
   goAwayGraceMs: 45_000,
+  goAwaySafetyMs: 3_000,
   maxResumeAttempts: 2,
   resumeBackoffMs: [1000, 2000],
   turnWallClockMs: 25_000,
 };
 
+/**
+ * Capture runs on its OWN AudioContext, pinned to 16 kHz, so the browser's
+ * spec-defined resampler does the conversion instead of hand-rolled
+ * decimation inside the worklet (a box filter that aliases everything above
+ * 8 kHz straight back into the speech band).
+ *
+ * Playback keeps its own context at the device rate: the model streams 24 kHz
+ * PCM, and a 16 kHz context would downsample every reply.
+ */
+const CAPTURE_RATE_HZ = 16_000;
+const CAPTURE_FRAME_MS = 40;
+
+/**
+ * `goAway.timeLeft` is a protobuf Duration — "45s", {seconds,nanos}, or plain
+ * seconds depending on transport. Never assume the 45 s default: the server is
+ * allowed to grant less, and handing over late means a hard drop.
+ */
+function parseGoAwayTimeLeft(timeLeft: unknown): number {
+  if (typeof timeLeft === 'string') {
+    const match = /^([0-9.]+)s$/.exec(timeLeft.trim());
+    if (match) return Math.round(parseFloat(match[1]) * 1000);
+    const asNumber = Number(timeLeft);
+    if (Number.isFinite(asNumber)) return Math.round(asNumber * 1000);
+  } else if (typeof timeLeft === 'number' && Number.isFinite(timeLeft)) {
+    return Math.round(timeLeft * 1000);
+  } else if (timeLeft && typeof timeLeft === 'object') {
+    const secs = Number((timeLeft as { seconds?: number }).seconds ?? 0);
+    const nanos = Number((timeLeft as { nanos?: number }).nanos ?? 0);
+    if (Number.isFinite(secs) && Number.isFinite(nanos)) {
+      return Math.round(secs * 1000 + nanos / 1e6);
+    }
+  }
+  return LIMITS.goAwayGraceMs;
+}
+
 export class SofiaLiveSession {
   private state: LiveConnState = 'off';
   private ws: WebSocket | null = null;
-  private audioCtx: AudioContext | null = null;
+  private audioCtx: AudioContext | null = null; // playback only
+  private captureCtx: AudioContext | null = null; // microphone only
+  private captureRate = CAPTURE_RATE_HZ;
   private micStream: MediaStream | null = null;
   private workletNode: AudioWorkletNode | null = null;
 
@@ -94,6 +132,7 @@ export class SofiaLiveSession {
   private metricsTimer: NodeJS.Timeout | null = null;
   private hardCapTimer: NodeJS.Timeout | null = null;
   private turnTimeoutTimer: NodeJS.Timeout | null = null;
+  private idleDrainTimer: NodeJS.Timeout | null = null;
   private activeModel = 'gemini-2.0-flash-exp';
   private activeVoice = 'Aoede';
 
@@ -154,13 +193,32 @@ export class SofiaLiveSession {
     this.setState('minting');
 
     try {
-      // 1. Initialize AudioContext and AudioWorklet
+      // 1. Two contexts: capture (16 kHz) and playback (device rate).
       const AudioCtx =
         window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+
+      // Playback stays at the device rate — 24 kHz model audio is resampled by
+      // the browser, but a 16 kHz graph would downsample every reply.
       this.audioCtx = new AudioCtx();
       if (this.audioCtx.state === 'suspended') {
         await this.audioCtx.resume();
       }
+
+      // Capture asks for 16 kHz so the browser's own resampler does the work.
+      // A browser that ignores the hint still works: we read the real rate back
+      // and declare THAT upstream, and the Live API resamples any rate.
+      let captureCtx: AudioContext;
+      try {
+        captureCtx = new AudioCtx({ sampleRate: CAPTURE_RATE_HZ });
+      } catch (ctxErr) {
+        console.warn('16 kHz capture context unsupported; falling back to device rate:', ctxErr);
+        captureCtx = new AudioCtx();
+      }
+      if (captureCtx.state === 'suspended') {
+        await captureCtx.resume();
+      }
+      this.captureCtx = captureCtx;
+      this.captureRate = Math.round(captureCtx.sampleRate) || CAPTURE_RATE_HZ;
 
       this.micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -171,50 +229,11 @@ export class SofiaLiveSession {
         },
       });
 
-      try {
-        await this.audioCtx.audioWorklet.addModule('/worklets/pcm-16k.js');
-      } catch (workletErr) {
-        console.warn('Network worklet load failed, using inlined worklet Blob fallback:', workletErr);
-        const workletCode = `
-          class PCM16K extends AudioWorkletProcessor {
-            constructor() {
-              super();
-              this.ratio = sampleRate / 16000;
-              this.acc = 0;
-              this.n = 0;
-              this.out = [];
-            }
-            process(inputs) {
-              const ch = inputs[0]?.[0];
-              if (!ch) return true;
-              for (let i = 0; i < ch.length; i++) {
-                this.acc += ch[i];
-                this.n++;
-                if (this.n >= this.ratio) {
-                  const v = Math.max(-1, Math.min(1, this.acc / this.n));
-                  this.out.push(v < 0 ? v * 0x8000 : v * 0x7fff);
-                  this.acc = 0;
-                  this.n = 0;
-                }
-              }
-              while (this.out.length >= 640) {
-                const pcm = new Int16Array(this.out.splice(0, 640));
-                const b = new Uint8Array(pcm.buffer);
-                let s = '';
-                for (let i = 0; i < b.length; i++) {
-                  s += String.fromCharCode(b[i]);
-                }
-                this.port.postMessage(btoa(s));
-              }
-              return true;
-            }
-          }
-          registerProcessor('pcm-16k', PCM16K);
-        `;
-        const blob = new Blob([workletCode], { type: 'application/javascript' });
-        const blobUrl = URL.createObjectURL(blob);
-        await this.audioCtx.audioWorklet.addModule(blobUrl);
-      }
+      // One worklet implementation, shipped as a static asset. No inline Blob
+      // fallback: a divergent second copy of the capture path is how the
+      // aliasing defect survived, and a silent fallback hides the failure
+      // instead of surfacing it.
+      await captureCtx.audioWorklet.addModule('/worklets/pcm-16k.js');
 
       // 2. Mint ephemeral token & fetch live connect configuration
       const tokenRes = await fetch('/api/live/token', {
@@ -300,9 +319,13 @@ export class SofiaLiveSession {
         }
       }
 
-      if (this.resumptionHandle) {
-        setupMsg.setup.sessionResumption = { handle: this.resumptionHandle };
-      }
+      // ALWAYS request resumption. Updates only arrive when the setup asked for
+      // them, so gating this behind an existing handle means a fresh
+      // conversation never receives one and every reconnect silently starts a
+      // brand-new session. An empty config is the documented bootstrap form.
+      setupMsg.setup.sessionResumption = this.resumptionHandle
+        ? { handle: this.resumptionHandle }
+        : {};
 
       ws.send(JSON.stringify(setupMsg));
     };
@@ -358,7 +381,18 @@ export class SofiaLiveSession {
       }
     }
 
-    // 3. Server-side interruption (barge-in acknowledgement)
+    // 3. Server voice-activity signal — a model-side VAD event, more reliable
+    //    than an absolute RMS threshold on an AGC-normalised mic. ACTIVITY_START
+    //    while she is talking is an authoritative barge-in; flush immediately
+    //    instead of waiting for a local threshold to trip.
+    if (msg.voiceActivity?.type) {
+      const vadType = String(msg.voiceActivity.type).toUpperCase();
+      if (vadType === 'ACTIVITY_START' && this.isModelSpeaking) {
+        this.flushAudio();
+      }
+    }
+
+    // 4. Server-side interruption (barge-in acknowledgement)
     if (msg.serverContent?.interrupted) {
       this.flushAudio();
       return;
@@ -414,6 +448,13 @@ export class SofiaLiveSession {
         }).catch((err) => console.warn('Failed to persist live voice turn:', err));
         this.lastRunId = null;
       }
+
+      // Her turn just ended — the correct instant to hand over a background
+      // result, rather than cutting into the sentence she was mid-way through.
+      if (this.pendingContextUpdates.length > 0) {
+        const pendingNow = this.pendingContextUpdates.shift();
+        if (pendingNow) this.deliverContextUpdate(pendingNow);
+      }
     }
 
     // 6. Tool Call Execution
@@ -421,12 +462,15 @@ export class SofiaLiveSession {
       this.handleToolCalls(msg.toolCall.functionCalls);
     }
 
-    // 7. GoAway signal before disconnect
+    // 7. GoAway signal before disconnect — it carries the actual remaining
+    //    time, so schedule from that instead of the assumed grace period.
     if (msg.goAway) {
-      console.log('Received goAway from Gemini Live, preparing hand-over');
+      const graceMs = parseGoAwayTimeLeft(msg.goAway.timeLeft);
+      const handoverIn = Math.max(1_000, graceMs - LIMITS.goAwaySafetyMs);
+      console.log(`goAway from Gemini Live — handing over in ${handoverIn}ms (server allowed ${graceMs}ms)`);
       setTimeout(() => {
         this.attemptReconnect();
-      }, LIMITS.goAwayGraceMs - 5000);
+      }, handoverIn);
     }
   }
 
@@ -485,31 +529,49 @@ export class SofiaLiveSession {
   }
 
   private startMicStreaming() {
-    if (!this.audioCtx || !this.micStream) return;
+    if (!this.captureCtx || !this.micStream) return;
 
     try {
-      const source = this.audioCtx.createMediaStreamSource(this.micStream);
-      const worklet = new AudioWorkletNode(this.audioCtx, 'pcm-16k');
+      // A reconnect re-enters here; drop the previous node so we never end up
+      // with two capture graphs posting frames into one socket.
+      if (this.workletNode) {
+        try {
+          this.workletNode.disconnect();
+          this.workletNode.port.onmessage = null;
+        } catch {}
+        this.workletNode = null;
+      }
+
+      const source = this.captureCtx.createMediaStreamSource(this.micStream);
+      const worklet = new AudioWorkletNode(this.captureCtx, 'pcm-16k', {
+        processorOptions: {
+          frameSamples: Math.round(this.captureRate * (CAPTURE_FRAME_MS / 1000)),
+        },
+      });
       this.workletNode = worklet;
 
-      worklet.port.onmessage = (e) => {
-        const b64 = e.data;
+      worklet.port.onmessage = (e: MessageEvent) => {
+        const payload = e.data as { b64?: string; rms?: number };
+        if (!payload?.b64) return;
+
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          // Send 16kHz PCM audio
+          // Declare the rate we ACTUALLY captured at, not the rate we hoped for.
+          // The Live API resamples server-side, so a browser that ignored the
+          // 16 kHz hint still produces correctly-timed audio.
           this.ws.send(
             JSON.stringify({
               realtimeInput: {
                 audio: {
-                  data: b64,
-                  mimeType: 'audio/pcm;rate=16000',
+                  data: payload.b64,
+                  mimeType: `audio/pcm;rate=${this.captureRate}`,
                 },
               },
             })
           );
         }
 
-        // Local VAD computation for barge-in
-        this.analyzeLocalMicChunk(b64);
+        // VAD runs on the RMS computed in the audio thread — no decode here.
+        this.analyzeLocalMicChunk(payload.rms ?? 0);
       };
 
       source.connect(worklet);
@@ -519,21 +581,8 @@ export class SofiaLiveSession {
     }
   }
 
-  private analyzeLocalMicChunk(b64: string) {
+  private analyzeLocalMicChunk(rms: number) {
     try {
-      const binary = atob(b64);
-      const len = binary.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
-      const pcm16 = new Int16Array(bytes.buffer);
-
-      let sumSq = 0;
-      for (let i = 0; i < pcm16.length; i++) {
-        const norm = pcm16[i] / 32768;
-        sumSq += norm * norm;
-      }
-      const rms = Math.sqrt(sumSq / pcm16.length);
-
       const SPEECH_RMS_THRESHOLD = 0.035;
       const now = Date.now();
 
@@ -564,12 +613,9 @@ export class SofiaLiveSession {
               this.ws.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
             }
 
-            if (this.pendingContextUpdates.length > 0) {
-              const pending = this.pendingContextUpdates.shift();
-              if (pending) {
-                this.injectContextUpdate(pending, { scheduling: 'IMMEDIATE' });
-              }
-            }
+            // Do not inject a background result into the same instant her answer
+            // starts — arm the idle drain instead.
+            this.scheduleIdleDrain();
           }
         }
       }
@@ -709,10 +755,50 @@ export class SofiaLiveSession {
     console.log('40-minute scheduled session migration triggered');
     try {
       this.flushAudio();
-      if (this.ws) {
-        this.ws.close();
-      }
       this.resumptionHandle = null;
+
+      // Tear the old graph down completely: start() is a no-op unless the state
+      // is off/failed, so leaving state at 'live' made this migration silently
+      // do nothing at all — the 40-minute promise never actually ran.
+      if (this.workletNode) {
+        try {
+          this.workletNode.port.onmessage = null;
+          this.workletNode.disconnect();
+        } catch {}
+        this.workletNode = null;
+      }
+      if (this.ws) {
+        try {
+          this.ws.close();
+        } catch {}
+        this.ws = null;
+      }
+      if (this.micStream) {
+        this.micStream.getTracks().forEach((t) => t.stop());
+        this.micStream = null;
+      }
+      if (this.audioCtx && this.audioCtx.state !== 'closed') {
+        this.audioCtx.close().catch(() => {});
+        this.audioCtx = null;
+      }
+      if (this.captureCtx && this.captureCtx.state !== 'closed') {
+        this.captureCtx.close().catch(() => {});
+        this.captureCtx = null;
+      }
+      if (this.hardCapTimer) {
+        clearTimeout(this.hardCapTimer);
+        this.hardCapTimer = null;
+      }
+      if (this.metricsTimer) {
+        clearInterval(this.metricsTimer);
+        this.metricsTimer = null;
+      }
+      if (this.mouthAnimFrame) {
+        cancelAnimationFrame(this.mouthAnimFrame);
+        this.mouthAnimFrame = null;
+      }
+
+      this.setState('off');
       await this.start();
     } catch (err) {
       console.warn('Migration error:', err);
@@ -749,17 +835,41 @@ export class SofiaLiveSession {
 
   /**
    * Injects background task completion context or system notification into Gemini Live.
-   * Defaults to WHEN_IDLE to avoid interrupting user speech mid-sentence.
+   *
+   * `clientContent` with `turnComplete: true` unconditionally interrupts the
+   * model's current generation, so a Hermes result that lands mid-sentence cuts
+   * her off and permanently appends a synthetic user turn to the conversation
+   * history. Deliver only when nothing is being spoken (either direction), and
+   * fall back to a short idle timer for the case where no turn ever completes.
    */
   public injectContextUpdate(
     text: string,
     options: { scheduling?: 'WHEN_IDLE' | 'SILENT' | 'IMMEDIATE' } = { scheduling: 'WHEN_IDLE' }
   ) {
-    if (options.scheduling === 'WHEN_IDLE' && this.isUserSpeaking) {
+    if (options.scheduling !== 'IMMEDIATE' && (this.isUserSpeaking || this.isModelSpeaking)) {
       this.pendingContextUpdates.push(text);
+      this.scheduleIdleDrain();
       return;
     }
+    this.deliverContextUpdate(text);
+  }
 
+  private scheduleIdleDrain() {
+    if (this.idleDrainTimer || this.pendingContextUpdates.length === 0) return;
+    this.idleDrainTimer = setTimeout(() => {
+      this.idleDrainTimer = null;
+      if (this.pendingContextUpdates.length === 0) return;
+      if (this.isUserSpeaking || this.isModelSpeaking) {
+        this.scheduleIdleDrain();
+        return;
+      }
+      const next = this.pendingContextUpdates.shift();
+      if (next) this.deliverContextUpdate(next);
+      if (this.pendingContextUpdates.length > 0) this.scheduleIdleDrain();
+    }, 2000);
+  }
+
+  private deliverContextUpdate(text: string) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(
         JSON.stringify({
@@ -800,6 +910,10 @@ export class SofiaLiveSession {
       clearTimeout(this.turnTimeoutTimer);
       this.turnTimeoutTimer = null;
     }
+    if (this.idleDrainTimer) {
+      clearTimeout(this.idleDrainTimer);
+      this.idleDrainTimer = null;
+    }
     if (this.mouthAnimFrame) {
       cancelAnimationFrame(this.mouthAnimFrame);
       this.mouthAnimFrame = null;
@@ -816,6 +930,10 @@ export class SofiaLiveSession {
     if (this.audioCtx && this.audioCtx.state !== 'closed') {
       this.audioCtx.close().catch(() => {});
       this.audioCtx = null;
+    }
+    if (this.captureCtx && this.captureCtx.state !== 'closed') {
+      this.captureCtx.close().catch(() => {});
+      this.captureCtx = null;
     }
 
     if (this.ws) {
