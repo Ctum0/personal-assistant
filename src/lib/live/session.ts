@@ -256,10 +256,12 @@ export class SofiaLiveSession {
         },
       });
 
-      // ?v=2 busts a CDN/service-worker cached copy of the pre-fix worklet,
-      // which posts a different message shape entirely.
+      // Version is a content hash computed in next.config.ts. The old fixed
+      // "?v=2" pinned the broken btoa worklet in browser and Cloudflare
+      // caches (max-age=14400) for four hours after every deploy.
+      const workletVersion = process.env.NEXT_PUBLIC_WORKLET_V || "dev";
       try {
-        await captureCtx.audioWorklet.addModule('/worklets/pcm-16k.js?v=2');
+        await captureCtx.audioWorklet.addModule(`/worklets/pcm-16k.js?v=${workletVersion}`);
       } catch (workletErr) {
         throw new Error(
           `Voice capture module failed to load (${workletErr instanceof Error ? workletErr.message : 'unknown error'})`
