@@ -216,10 +216,10 @@ export default function SofiaStageHome() {
           const activeRuns = data.runs.filter((r: any) =>
             ['running', 'started', 'queued'].includes(r.status)
           );
-          const recentCompleted = data.runs
-            .filter((r: any) => r.status === 'completed' && r.output)
-            .slice(0, 1);
-          const runsToShow = [...activeRuns, ...recentCompleted];
+          // Only ACTIVE runs rehydrate. Seeding completed runs as panes is why
+          // two stale "Task Completed" cards reappeared on every refresh — the
+          // conversation history already holds those results.
+          const runsToShow = activeRuns;
           if (runsToShow.length > 0) {
             setPanes((prev) => {
               const existingRunIds = new Set(prev.map((p) => p.run_id));
@@ -386,47 +386,24 @@ export default function SofiaStageHome() {
     };
   }, [liveState]);
 
-  // Single-Brain Voice Toggle (Transcription-First -> Hermes -> Edge TTS)
-  const toggleVoiceMode = useCallback(async () => {
+  // ONE voice lane. The mic button and the headphones both drive the duplex
+  // Live session; Whisper survives only as an automatic fallback when Live
+  // fails to come up. Two live input pipelines is exactly what produced
+  // overlapping voices and a half-transcribed sentence per utterance.
+  const startLiveSession = useCallback(async () => {
     unlockAudio();
-    if (isVoiceListening) {
-      stopVoiceInput();
-      setLiveState('off');
-    } else {
-      if (liveSessionRef.current) {
-        liveSessionRef.current.stop();
-        liveSessionRef.current = null;
-      }
-      setAudioOwner(isMuted ? 'MUTED' : 'FALLBACK_TTS');
-      stopSpeaking();
-      await startVoiceInput();
-    }
-  }, [isVoiceListening, isMuted, startVoiceInput, stopVoiceInput]);
-
-  // Handle Talk / Hang up Toggle
-  const toggleLiveVoice = useCallback(async () => {
-    unlockAudio();
-
-    if (liveSessionRef.current) {
-      // Hang up
-      liveSessionRef.current.stop();
-      liveSessionRef.current = null;
-      setAudioOwner(isMuted ? 'MUTED' : 'FALLBACK_TTS');
-      setLiveState('off');
-      setIsSpeaking(false);
-      setMouthOpen(0);
-      setMicLevel(0);
-      return;
-    }
-
-    if (isVoiceListening) {
-      stopVoiceInput();
-    }
     stopSpeaking();
     setAudioOwner(isMuted ? 'MUTED' : 'LIVE_GEMINI');
-
-    // Start Live Session
     setLiveState('connecting');
+
+    // Diagnostic: if the user ever hears two voices, the console shows whether
+    // it is two Live sessions (this counter) or Live + TTS fighting.
+    if (typeof window !== 'undefined') {
+      const w = window as unknown as { __sofiaLiveSessions?: number };
+      w.__sofiaLiveSessions = (w.__sofiaLiveSessions || 0) + 1;
+      console.info(`[sofia] live session #${w.__sofiaLiveSessions} starting`);
+    }
+
     const session = new SofiaLiveSession({
       onStateChange: (st: LiveConnState) => {
         if (st === 'off' || st === 'closing') {
@@ -494,7 +471,47 @@ export default function SofiaStageHome() {
 
     liveSessionRef.current = session;
     await session.start();
-  }, [conversationId]);
+
+    // Fall back only on a genuine failure, never on "not connected yet".
+    if (session.getState() === 'failed') {
+      liveSessionRef.current = null;
+      console.warn('Live session failed; falling back to the transcription lane');
+      setAudioOwner(isMuted ? 'MUTED' : 'FALLBACK_TTS');
+      setLiveState('off');
+      await startVoiceInput();
+    }
+  }, [conversationId, isMuted, startVoiceInput]);
+
+  const stopLiveSession = useCallback(() => {
+    if (!liveSessionRef.current) return;
+    liveSessionRef.current.stop();
+    liveSessionRef.current = null;
+    setAudioOwner(isMuted ? 'MUTED' : 'FALLBACK_TTS');
+    setLiveState('off');
+    setIsSpeaking(false);
+    setMouthOpen(0);
+    setMicLevel(0);
+  }, [isMuted]);
+
+  const toggleVoiceMode = useCallback(async () => {
+    if (liveSessionRef.current) {
+      stopLiveSession();
+      return;
+    }
+    if (isVoiceListening) {
+      stopVoiceInput();
+      return;
+    }
+    await startLiveSession();
+  }, [isVoiceListening, startLiveSession, stopLiveSession, stopVoiceInput]);
+
+  const toggleLiveVoice = useCallback(async () => {
+    if (liveSessionRef.current) {
+      stopLiveSession();
+      return;
+    }
+    await startLiveSession();
+  }, [startLiveSession, stopLiveSession]);
 
   const handleSendMessage = async (textToSend?: string, channel: 'chat' | 'voice' = 'chat') => {
     const text = (textToSend || inputText).trim();

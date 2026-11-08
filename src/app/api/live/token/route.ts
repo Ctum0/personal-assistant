@@ -66,6 +66,8 @@ export async function POST(req: NextRequest) {
       systemPrompt: cfg.systemPrompt,
       functionDeclarations: cfg.functionDeclarations,
       realtimeInputConfig: cfg.realtimeInputConfig,
+      inputAudioTranscription: cfg.inputAudioTranscription,
+      outputAudioTranscription: cfg.outputAudioTranscription,
       contextWindowCompression: cfg.contextWindowCompression,
     });
   } catch (err: any) {

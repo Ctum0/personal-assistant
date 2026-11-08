@@ -17,6 +17,8 @@ export interface LiveConfig {
       endOfSpeechSensitivity: string;
     };
   };
+  inputAudioTranscription?: Record<string, never>;
+  outputAudioTranscription?: Record<string, never>;
   contextWindowCompression?: {
     slidingWindow: {
       targetTokens: number;
@@ -48,6 +50,10 @@ export function getLiveConfig(
         endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
       },
     },
+    // Live emits transcript events only when the setup requests them. Requesting
+    // both is what makes "You: ..." and her spoken text exist in the UI at all.
+    inputAudioTranscription: {},
+    outputAudioTranscription: {},
     contextWindowCompression: {
       slidingWindow: {
         targetTokens: Number(process.env.SOFIA_COMPRESSION_TARGET_TOKENS ?? 8192),

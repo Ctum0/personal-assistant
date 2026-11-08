@@ -308,6 +308,11 @@ export class SofiaLiveSession {
           systemInstruction: {
             parts: [{ text: configData.systemPrompt || 'You are Sofia.' }],
           },
+          // Live only emits transcript events when the setup asks for them, so
+          // without these two the UI never knows what the user said and has no
+          // text for her spoken reply (AUDIO modality returns no text parts).
+          inputAudioTranscription: configData.inputAudioTranscription ?? {},
+          outputAudioTranscription: configData.outputAudioTranscription ?? {},
           contextWindowCompression: configData.contextWindowCompression || {
             slidingWindow: {
               targetTokens: 8192,
@@ -378,7 +383,22 @@ export class SofiaLiveSession {
       return;
     }
 
-    // 2. Resumption update handle
+    // 2. Live transcription. Input transcription is the ONLY source of the
+    //    user's words on the audio lane; output transcription is the only
+    //    source of her words, because AUDIO modality returns no text parts.
+    const inputTr = msg.serverContent?.inputTranscription?.text;
+    if (inputTr) {
+      this.userCaption += inputTr;
+      this.callbacks.onCaption?.(this.userCaption, this.modelCaption);
+    }
+
+    const outputTr = msg.serverContent?.outputTranscription?.text;
+    if (outputTr) {
+      this.modelCaption += outputTr;
+      this.callbacks.onCaption?.(this.userCaption, this.modelCaption);
+    }
+
+    // 3. Resumption update handle
     if (msg.sessionResumptionUpdate?.newHandle) {
       const handle = String(msg.sessionResumptionUpdate.newHandle);
       this.resumptionHandle = handle;
@@ -623,6 +643,9 @@ export class SofiaLiveSession {
           this.lastTtfa = null;
           this.lastTtft = null;
           this.modelCaption = '';
+          // Fresh turn: the Live transcription stream appends per word, so it
+          // must start empty or the previous sentence bleeds into this one.
+          this.userCaption = '';
         }
 
         // Barge-in check: if user speaks for >= 200ms while model audio is playing, flush!
