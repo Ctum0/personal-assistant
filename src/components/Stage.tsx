@@ -98,7 +98,7 @@ export const Stage: React.FC<StageProps> = ({
 
         {/* Spoken Caption (Floating beneath her) */}
         {(captionText || liveState === 'thinking') && (
-          <div className="mt-6 max-w-xl w-full px-6 py-3.5 rounded-2xl backdrop-blur-xl bg-[#14030a]/75 border border-burgundy-800/40 shadow-[0_8px_32px_rgba(20,3,10,0.6)] text-center transition-all duration-300 animate-fadeIn">
+          <div className={`mt-6 ${paneCount > 0 ? 'max-w-md' : 'max-w-xl'} w-full px-6 py-3.5 rounded-2xl backdrop-blur-xl bg-[#14030a]/75 border border-burgundy-800/40 shadow-[0_8px_32px_rgba(20,3_10,0.6)] text-center transition-all duration-300 animate-fadeIn`}>
             <div className="flex items-center justify-center space-x-2 mb-1 text-[11px] font-mono text-rose-400/80">
               {isSpeaking && (
                 <span className="flex items-center space-x-1.5 text-rose-300">
