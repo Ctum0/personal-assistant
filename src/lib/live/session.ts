@@ -102,6 +102,7 @@ export class SofiaLiveSession {
   private captureRate = CAPTURE_RATE_HZ;
   private micStream: MediaStream | null = null;
   private micSource: MediaStreamAudioSourceNode | null = null;
+  private captureSink: GainNode | null = null;
   private workletNode: AudioWorkletNode | null = null;
 
   // Playback queue & audio scheduling
@@ -565,6 +566,12 @@ export class SofiaLiveSession {
       // A reconnect re-enters here; tear the previous capture graph down so we
       // never end up with two sources and two live processors posting frames
       // into one socket (the old processor keeps running even with a null port).
+      if (this.captureSink) {
+        try {
+          this.captureSink.disconnect();
+        } catch {}
+        this.captureSink = null;
+      }
       if (this.micSource) {
         try {
           this.micSource.disconnect();
@@ -622,6 +629,18 @@ export class SofiaLiveSession {
       };
 
       source.connect(worklet);
+
+      // An AudioWorkletNode with no downstream connection is never pulled by the
+      // render graph, so process() never runs and not a single frame is posted —
+      // the microphone is silent even though everything "started". Route it
+      // through a zero-gain node so it is scheduled every quantum without making
+      // any sound.
+      const sink = this.captureCtx.createGain();
+      sink.gain.value = 0;
+      worklet.connect(sink);
+      sink.connect(this.captureCtx.destination);
+      this.captureSink = sink;
+
       this.setState('listening');
     } catch (err) {
       console.warn('Failed to start audio worklet mic capture:', err);
@@ -812,6 +831,12 @@ export class SofiaLiveSession {
       // Tear the old graph down completely: start() is a no-op unless the state
       // is off/failed, so leaving state at 'live' made this migration silently
       // do nothing at all — the 40-minute promise never actually ran.
+      if (this.captureSink) {
+        try {
+          this.captureSink.disconnect();
+        } catch {}
+        this.captureSink = null;
+      }
       if (this.micSource) {
         try {
           this.micSource.disconnect();
@@ -994,6 +1019,12 @@ export class SofiaLiveSession {
       this.mouthAnimFrame = null;
     }
 
+    if (this.captureSink) {
+      try {
+        this.captureSink.disconnect();
+      } catch {}
+      this.captureSink = null;
+    }
     if (this.micSource) {
       try {
         this.micSource.disconnect();
