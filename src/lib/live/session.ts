@@ -70,9 +70,11 @@ const CAPTURE_RATE_HZ = 16_000;
 const CAPTURE_FRAME_MS = 40;
 
 /**
- * `goAway.timeLeft` is a protobuf Duration — "45s", {seconds,nanos}, or plain
- * seconds depending on transport. Never assume the 45 s default: the server is
- * allowed to grant less, and handing over late means a hard drop.
+ * `goAway.timeLeft` is a google.protobuf.Duration. Proto3 JSON maps that to a
+ * decimal string with an "s" suffix ("45s"), which is what the WebSocket sends;
+ * the object/number branches are defensive only (gRPC-native shapes). Never
+ * assume the 45 s default — the server is allowed to grant less, and handing
+ * over late means a hard drop.
  */
 function parseGoAwayTimeLeft(timeLeft: unknown): number {
   if (typeof timeLeft === 'string') {
@@ -99,6 +101,7 @@ export class SofiaLiveSession {
   private captureCtx: AudioContext | null = null; // microphone only
   private captureRate = CAPTURE_RATE_HZ;
   private micStream: MediaStream | null = null;
+  private micSource: MediaStreamAudioSourceNode | null = null;
   private workletNode: AudioWorkletNode | null = null;
 
   // Playback queue & audio scheduling
@@ -133,6 +136,7 @@ export class SofiaLiveSession {
   private hardCapTimer: NodeJS.Timeout | null = null;
   private turnTimeoutTimer: NodeJS.Timeout | null = null;
   private idleDrainTimer: NodeJS.Timeout | null = null;
+  private goAwayTimer: NodeJS.Timeout | null = null;
   private activeModel = 'gemini-2.0-flash-exp';
   private activeVoice = 'Aoede';
 
@@ -229,11 +233,15 @@ export class SofiaLiveSession {
         },
       });
 
-      // One worklet implementation, shipped as a static asset. No inline Blob
-      // fallback: a divergent second copy of the capture path is how the
-      // aliasing defect survived, and a silent fallback hides the failure
-      // instead of surfacing it.
-      await captureCtx.audioWorklet.addModule('/worklets/pcm-16k.js');
+      // ?v=2 busts a CDN/service-worker cached copy of the pre-fix worklet,
+      // which posts a different message shape entirely.
+      try {
+        await captureCtx.audioWorklet.addModule('/worklets/pcm-16k.js?v=2');
+      } catch (workletErr) {
+        throw new Error(
+          `Voice capture module failed to load (${workletErr instanceof Error ? workletErr.message : 'unknown error'})`
+        );
+      }
 
       // 2. Mint ephemeral token & fetch live connect configuration
       const tokenRes = await fetch('/api/live/token', {
@@ -381,18 +389,7 @@ export class SofiaLiveSession {
       }
     }
 
-    // 3. Server voice-activity signal — a model-side VAD event, more reliable
-    //    than an absolute RMS threshold on an AGC-normalised mic. ACTIVITY_START
-    //    while she is talking is an authoritative barge-in; flush immediately
-    //    instead of waiting for a local threshold to trip.
-    if (msg.voiceActivity?.type) {
-      const vadType = String(msg.voiceActivity.type).toUpperCase();
-      if (vadType === 'ACTIVITY_START' && this.isModelSpeaking) {
-        this.flushAudio();
-      }
-    }
-
-    // 4. Server-side interruption (barge-in acknowledgement)
+    // 3. Server-side interruption (barge-in acknowledgement)
     if (msg.serverContent?.interrupted) {
       this.flushAudio();
       return;
@@ -451,9 +448,15 @@ export class SofiaLiveSession {
 
       // Her turn just ended — the correct instant to hand over a background
       // result, rather than cutting into the sentence she was mid-way through.
+      // Still not while the *user* is talking: turnComplete can fire during a
+      // half-duplex gap, and injecting then talks over them.
       if (this.pendingContextUpdates.length > 0) {
-        const pendingNow = this.pendingContextUpdates.shift();
-        if (pendingNow) this.deliverContextUpdate(pendingNow);
+        if (this.isUserSpeaking) {
+          this.scheduleIdleDrain();
+        } else {
+          const pendingNow = this.pendingContextUpdates.shift();
+          if (pendingNow) this.deliverContextUpdate(pendingNow);
+        }
       }
     }
 
@@ -468,9 +471,18 @@ export class SofiaLiveSession {
       const graceMs = parseGoAwayTimeLeft(msg.goAway.timeLeft);
       const handoverIn = Math.max(1_000, graceMs - LIMITS.goAwaySafetyMs);
       console.log(`goAway from Gemini Live — handing over in ${handoverIn}ms (server allowed ${graceMs}ms)`);
-      setTimeout(() => {
+      this.clearGoAwayTimer();
+      this.goAwayTimer = setTimeout(() => {
+        this.goAwayTimer = null;
         this.attemptReconnect();
       }, handoverIn);
+    }
+  }
+
+  private clearGoAwayTimer() {
+    if (this.goAwayTimer) {
+      clearTimeout(this.goAwayTimer);
+      this.goAwayTimer = null;
     }
   }
 
@@ -532,17 +544,26 @@ export class SofiaLiveSession {
     if (!this.captureCtx || !this.micStream) return;
 
     try {
-      // A reconnect re-enters here; drop the previous node so we never end up
-      // with two capture graphs posting frames into one socket.
+      // A reconnect re-enters here; tear the previous capture graph down so we
+      // never end up with two sources and two live processors posting frames
+      // into one socket (the old processor keeps running even with a null port).
+      if (this.micSource) {
+        try {
+          this.micSource.disconnect();
+        } catch {}
+        this.micSource = null;
+      }
       if (this.workletNode) {
         try {
-          this.workletNode.disconnect();
           this.workletNode.port.onmessage = null;
+          this.workletNode.port.close();
+          this.workletNode.disconnect();
         } catch {}
         this.workletNode = null;
       }
 
       const source = this.captureCtx.createMediaStreamSource(this.micStream);
+      this.micSource = source;
       const worklet = new AudioWorkletNode(this.captureCtx, 'pcm-16k', {
         processorOptions: {
           frameSamples: Math.round(this.captureRate * (CAPTURE_FRAME_MS / 1000)),
@@ -551,8 +572,16 @@ export class SofiaLiveSession {
       this.workletNode = worklet;
 
       worklet.port.onmessage = (e: MessageEvent) => {
-        const payload = e.data as { b64?: string; rms?: number };
-        if (!payload?.b64) return;
+        // A cached pre-fix worklet posts a bare base64 string. Accept both
+        // shapes: without this guard a stale asset means a silently dead
+        // microphone with no error anywhere.
+        const payload = e.data as { b64?: string; rms?: number } | string;
+        const b64 = typeof payload === 'string' ? payload : payload?.b64;
+        const rms = typeof payload === 'string' ? 0 : (payload?.rms ?? 0);
+        if (!b64) {
+          console.warn('Unexpected capture worklet payload; ignoring frame');
+          return;
+        }
 
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           // Declare the rate we ACTUALLY captured at, not the rate we hoped for.
@@ -562,7 +591,7 @@ export class SofiaLiveSession {
             JSON.stringify({
               realtimeInput: {
                 audio: {
-                  data: payload.b64,
+                  data: b64,
                   mimeType: `audio/pcm;rate=${this.captureRate}`,
                 },
               },
@@ -571,7 +600,7 @@ export class SofiaLiveSession {
         }
 
         // VAD runs on the RMS computed in the audio thread — no decode here.
-        this.analyzeLocalMicChunk(payload.rms ?? 0);
+        this.analyzeLocalMicChunk(rms);
       };
 
       source.connect(worklet);
@@ -755,23 +784,38 @@ export class SofiaLiveSession {
     console.log('40-minute scheduled session migration triggered');
     try {
       this.flushAudio();
-      this.resumptionHandle = null;
+      // NOTE: the resumption handle is deliberately KEPT. Dropping it here
+      // started a brand-new conversation at the 40-minute mark, throwing away
+      // exactly the context that session resumption exists to preserve.
 
       // Tear the old graph down completely: start() is a no-op unless the state
       // is off/failed, so leaving state at 'live' made this migration silently
       // do nothing at all — the 40-minute promise never actually ran.
+      if (this.micSource) {
+        try {
+          this.micSource.disconnect();
+        } catch {}
+        this.micSource = null;
+      }
       if (this.workletNode) {
         try {
           this.workletNode.port.onmessage = null;
+          this.workletNode.port.close();
           this.workletNode.disconnect();
         } catch {}
         this.workletNode = null;
       }
+      // Detach the close handler BEFORE closing. Otherwise onclose fires after
+      // setState('off') has already flipped us into 'minting' and schedules a
+      // second reconnect, minting a second token while the new socket starts.
       if (this.ws) {
-        try {
-          this.ws.close();
-        } catch {}
+        const dying = this.ws;
         this.ws = null;
+        dying.onclose = null;
+        dying.onerror = null;
+        try {
+          dying.close();
+        } catch {}
       }
       if (this.micStream) {
         this.micStream.getTracks().forEach((t) => t.stop());
@@ -789,6 +833,15 @@ export class SofiaLiveSession {
         clearTimeout(this.hardCapTimer);
         this.hardCapTimer = null;
       }
+      if (this.turnTimeoutTimer) {
+        clearTimeout(this.turnTimeoutTimer);
+        this.turnTimeoutTimer = null;
+      }
+      if (this.idleDrainTimer) {
+        clearTimeout(this.idleDrainTimer);
+        this.idleDrainTimer = null;
+      }
+      this.clearGoAwayTimer();
       if (this.metricsTimer) {
         clearInterval(this.metricsTimer);
         this.metricsTimer = null;
@@ -914,13 +967,24 @@ export class SofiaLiveSession {
       clearTimeout(this.idleDrainTimer);
       this.idleDrainTimer = null;
     }
+    this.clearGoAwayTimer();
     if (this.mouthAnimFrame) {
       cancelAnimationFrame(this.mouthAnimFrame);
       this.mouthAnimFrame = null;
     }
 
+    if (this.micSource) {
+      try {
+        this.micSource.disconnect();
+      } catch {}
+      this.micSource = null;
+    }
     if (this.workletNode) {
-      this.workletNode.disconnect();
+      try {
+        this.workletNode.port.onmessage = null;
+        this.workletNode.port.close();
+        this.workletNode.disconnect();
+      } catch {}
       this.workletNode = null;
     }
     if (this.micStream) {
